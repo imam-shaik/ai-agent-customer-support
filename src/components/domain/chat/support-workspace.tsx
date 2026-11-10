@@ -639,7 +639,6 @@ export function SupportWorkspace() {
       <TopNavigation
         navItems={[
           { label: "Customer chat", href: "/", active: true },
-          { label: "Knowledge base", href: "/knowledge" },
           { label: "Staff queue", href: "/staff" },
         ]}
       />

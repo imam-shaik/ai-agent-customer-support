@@ -914,3 +914,123 @@ class TestDeterminism:
         assert [item.ref for item in first.cited] == [
             item.ref for item in second.cited
         ]
+
+# ---------------------------------------------------------------------------
+# 8b-2: spelling-corrected search_query from call #1 feeds retrieval
+# ---------------------------------------------------------------------------
+
+
+class TestSearchQueryCorrection:
+    """The assessment's spelling-corrected search_query (8b-2) is used for
+    retrieval and the coverage gate: the LLM understands garbled input,
+    the deterministic gates match raw tokens. Empty/absent falls back to
+    the raw question; an explicit retrieval_query still wins."""
+
+    @staticmethod
+    def _patch_recording_retrieval(
+        monkeypatch: pytest.MonkeyPatch,
+        queries: list[str],
+        candidates: tuple | None = None,
+    ) -> None:
+        from app.services.retrieval_service import RetrievalResult
+
+        class RecordingRetrievalService:
+            def __init__(self, db, provider=None):
+                self.db = db
+
+            def retrieve(self, query: str, **kwargs) -> RetrievalResult:
+                queries.append(query)
+                return RetrievalResult(
+                    embedding_model="fake",
+                    limit=5,
+                    include_challenge_fixtures=False,
+                    min_cosine_similarity=0.0,
+                    candidates=candidates if candidates is not None else (_candidate(1),),
+                )
+
+        monkeypatch.setattr(
+            "app.services.agent_service.RetrievalService",
+            RecordingRetrievalService,
+        )
+
+    def test_corrected_search_query_reaches_retrieval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        queries: list[str] = []
+        self._patch_recording_retrieval(
+            monkeypatch,
+            queries,
+            candidates=(
+                _candidate(
+                    1,
+                    doc_title="Team Management",
+                    section_title="Invite your team",
+                    content=(
+                        "Workspace owners can invite team members "
+                        "by email from the team settings page."
+                    ),
+                ),
+            ),
+        )
+        provider = ScriptedProvider(
+            {
+                TASK_ASSESSMENT: json.dumps(
+                    {
+                        "ambiguous": False,
+                        "clarification": "",
+                        "options": [],
+                        "search_query": "invite team members",
+                    }
+                ),
+                TASK_GENERATION: _GROUNDED_JSON,
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        decision = run_agent_turn(None, question="hw do i invte my tem?")
+
+        assert decision.kind == DECISION_GROUNDED
+        assert queries == ["invite team members"]
+
+    def test_missing_search_query_falls_back_to_raw_question(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        queries: list[str] = []
+        self._patch_recording_retrieval(monkeypatch, queries)
+        _patch_provider(
+            monkeypatch, ScriptedProvider({TASK_GENERATION: _GROUNDED_JSON})
+        )
+
+        decision = run_agent_turn(None, question=QUESTION)
+
+        assert decision.kind == DECISION_GROUNDED
+        assert queries == [QUESTION]
+
+    def test_explicit_retrieval_query_beats_search_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        queries: list[str] = []
+        self._patch_recording_retrieval(monkeypatch, queries)
+        provider = ScriptedProvider(
+            {
+                TASK_ASSESSMENT: json.dumps(
+                    {
+                        "ambiguous": False,
+                        "clarification": "",
+                        "options": [],
+                        "search_query": "invite team members",
+                    }
+                ),
+                TASK_GENERATION: _GROUNDED_JSON,
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        decision = run_agent_turn(
+            None,
+            question=QUESTION,
+            retrieval_query="reset password email link",
+        )
+
+        assert decision.kind == DECISION_GROUNDED
+        assert queries == ["reset password email link"]

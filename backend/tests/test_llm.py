@@ -428,7 +428,9 @@ class TestFourTaskPrompts:
             build_system_prompt("summarize-everything")
 
     def test_instructions_version_is_pinned(self):
-        assert INSTRUCTIONS_VERSION == "8b-1"
+        # 8b-2: assessment emits a spelling-corrected search_query and
+        # treats spelling mistakes as non-ambiguity (typo tolerance).
+        assert INSTRUCTIONS_VERSION == "8b-2"
 
 
 # ---------------------------------------------------------------------------

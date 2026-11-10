@@ -41,6 +41,11 @@ class QuestionAssessment(BaseModel):
     clarification: str = Field(default="", max_length=300)
     # 0–4 short options the customer can pick from; [] when not ambiguous.
     options: list[str] = Field(default_factory=list, max_length=4)
+    # Spelling-corrected, self-contained search text for retrieval (8b-2).
+    # Optional by contract: absent/empty ⇒ the raw question is used exactly
+    # as before (stub assessments, older prompts). Internal only — it feeds
+    # embedding + the deterministic coverage gate, never the customer.
+    search_query: str = Field(default="", max_length=400)
 
 
 class EvidenceVerdict(BaseModel):

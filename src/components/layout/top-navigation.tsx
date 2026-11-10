@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 import { Menu } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "@/components/brand/Logo";
 import { Avatar } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
-import { ProviderControls } from "@/components/domain/settings/provider-controls";
+import {
+  PROVIDER_MODE_EVENT,
+  ProviderControls,
+} from "@/components/domain/settings/provider-controls";
+import { api, ApiError } from "@/lib/api/client";
 import { ThemeToggle } from "./theme-toggle";
 import type { NavItem } from "./sidebar";
 import { cn } from "@/lib/utils";
@@ -18,6 +22,95 @@ interface TopNavigationProps {
   /** Optional extra right-aligned actions (rendered after provider controls). */
   actions?: ReactNode;
   onOpenMobileNav?: () => void;
+}
+
+type TenantMode = "demo" | "live" | "partial" | "offline";
+
+const TENANT_BADGE: Record<
+  TenantMode,
+  { text: string; title: string; tone: string }
+> = {
+  demo: {
+    text: "Demo · synthetic data",
+    title:
+      "Demo mode — deterministic local answers, no external API calls. Northstar Desk is a fictional tenant; all documents and customer information are synthetic.",
+    tone: "border-warning-border bg-warning-soft text-warning-ink",
+  },
+  live: {
+    text: "Live · synthetic data",
+    title:
+      "Answers come from the live configured providers. Northstar Desk is a fictional demo tenant — all documents and customer information are synthetic.",
+    tone: "border-success-border bg-success-soft text-success-ink",
+  },
+  partial: {
+    text: "Live · setup incomplete",
+    title:
+      "Live providers are selected but an API key is missing — see the banner below. All tenant data is synthetic.",
+    tone: "border-warning-border bg-warning-soft text-warning-ink",
+  },
+  offline: {
+    text: "Service offline",
+    title: "Can't reach the support service right now. All tenant data is synthetic.",
+    tone: "border-danger-border bg-danger-soft text-danger-ink",
+  },
+};
+
+/**
+ * Mode-aware tenant pill next to the brand. Uses the same source of truth
+ * as the mode banner (backend health mode + provider-mode change events),
+ * so the header never says "Demo" while the Live providers are attached.
+ * Occupies its space while the first probe is in flight (no layout shift).
+ */
+function TenantBadge() {
+  const [mode, setMode] = useState<TenantMode | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function check() {
+      try {
+        const health = await api.health();
+        if (!alive) return;
+        const reported = health.mode;
+        setMode(
+          reported === "offline_demo"
+            ? "demo"
+            : reported === "partial"
+              ? "partial"
+              : "live",
+        );
+      } catch (error) {
+        if (!alive) return;
+        setMode(
+          error instanceof ApiError && error.status === 0 ? "offline" : "live",
+        );
+      }
+    }
+
+    void check();
+    const timer = window.setInterval(() => void check(), 60_000);
+    window.addEventListener(PROVIDER_MODE_EVENT, check);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener(PROVIDER_MODE_EVENT, check);
+    };
+  }, []);
+
+  const badge = mode === null ? null : TENANT_BADGE[mode];
+
+  return (
+    <span
+      title={badge?.title ?? "Checking AI provider mode…"}
+      aria-label={badge?.text ?? "Checking AI provider mode"}
+      className={cn(
+        "hidden items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium sm:inline-flex",
+        badge ? badge.tone : "invisible border-transparent",
+      )}
+    >
+      {badge?.text ?? "…"}
+    </span>
+  );
 }
 
 /** Sticky global header: brand, primary links, provider controls, account. */
@@ -38,12 +131,7 @@ export function TopNavigation({
           <Logo showProduct />
         </Link>
 
-        <span
-          title="Northstar Desk is a fictional demo tenant. All documents and customer information are synthetic."
-          className="hidden items-center gap-1 rounded-full border border-warning-border bg-warning-soft px-2 py-0.5 text-[10px] font-medium text-warning-ink sm:inline-flex"
-        >
-          Demo · synthetic data
-        </span>
+        <TenantBadge />
 
         {navItems.length > 0 && (
           <nav aria-label="Primary" className="ml-4 hidden items-center gap-1 lg:flex">

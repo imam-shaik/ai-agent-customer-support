@@ -29,8 +29,8 @@ migrations, indexes the knowledge corpus when an embedding key is present,
 then opens:
 
 - Customer chat — <http://localhost:3000>
-- Knowledge base — <http://localhost:3000/knowledge>
-- Staff workspace — <http://localhost:3000/staff>
+- Staff workspace — <http://localhost:3000/staff> (queue + knowledge base tab)
+- Knowledge base — inside the staff workspace; `/knowledge` redirects there
 - API — <http://127.0.0.1:8000> (docs at `/docs`, health at `/health`)
 
 **No API key yet?** Click **Demo** in the header. Demo mode answers from
@@ -186,7 +186,7 @@ ai-agent-customer-support/
 │   │   ├── 📄 layout.tsx           ← root layout, theme + providers
 │   │   ├── 📄 page.tsx             ← customer chat  (localhost:3000)
 │   │   ├── 📄 globals.css
-│   │   ├── 📂 knowledge/  📄 page.tsx        ← knowledge base (/knowledge)
+│   │   ├── 📂 knowledge/  📄 page.tsx        ← redirects to /staff (knowledge base tab)
 │   │   └── 📂 staff/      📄 page.tsx        ← staff workspace (/staff)
 │   │
 │   ├── 📂 components/
@@ -204,7 +204,7 @@ ai-agent-customer-support/
 │   │   │   │   ├── 📄 feedback-control.tsx
 │   │   │   │   ├── 📄 thinking-indicator.tsx
 │   │   │   │   └── 📄 welcome-state.tsx
-│   │   │   ├── 📂 knowledge/      📄 knowledge-library.tsx
+│   │   │   ├── 📂 knowledge/      📄 knowledge-library.tsx ← staff workspace tab panel
 │   │   │   ├── 📂 settings/       📄 provider-controls.tsx · 📄 provider-settings-dialog.tsx
 │   │   │   └── 📂 staff/          📄 staff-workspace.tsx · 📄 staff-timeline.tsx
 │   │   │                          📄 ticket-queue.tsx · 📄 ticket-detail.tsx

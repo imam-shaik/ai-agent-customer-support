@@ -1,12 +1,10 @@
-import type { Metadata } from "next";
-import { KnowledgeLibrary } from "@/components/domain/knowledge/knowledge-library";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Knowledge base",
-  description:
-    "Synthetic Northstar Desk help documents, their processing status, and retrieval chunks.",
-};
-
+/**
+ * The knowledge base now lives inside the staff workspace as a tab
+ * (/staff → "Knowledge base"). This route redirects so existing
+ * links and bookmarks keep working.
+ */
 export default function KnowledgePage() {
-  return <KnowledgeLibrary />;
+  redirect("/staff");
 }

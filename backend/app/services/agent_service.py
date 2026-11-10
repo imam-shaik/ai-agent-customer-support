@@ -263,6 +263,17 @@ def run_agent_turn(
         )
 
     # --- 2. RETRIEVAL (approved scope, SQL-enforced) ---
+    # The assessment (call #1) also returns a spelling-corrected search
+    # query (8b-2): the LLM understands garbled input, while retrieval and
+    # the deterministic coverage gate match raw tokens. Empty/absent falls
+    # back to the raw question (stub assessments, older prompt versions).
+    # An explicit retrieval_query (clarified follow-up) still wins.
+    corrected = assessment.search_query.strip()
+    if corrected and retrieval_query is None:
+        # Bound to the retrieval contract; a search string is only
+        # embedded and token-matched, so truncation is safe.
+        working_query = corrected[: settings.retrieval_max_query_chars]
+
     try:
         retrieval = RetrievalService(db).retrieve(query=working_query)
     except EmbeddingProviderError as exc:

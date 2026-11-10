@@ -11,7 +11,7 @@ export function LogoMark({ className }: { className?: string }) {
       viewBox="0 0 20 20"
       fill="none"
       aria-hidden="true"
-      className={cn("size-6 shrink-0", className)}
+      className={cn("size-8 shrink-0", className)}
     >
       <rect
         x="0.75"
@@ -43,14 +43,14 @@ export function Logo({ compact = false, showProduct = false, className }: LogoPr
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <LogoMark />
       {!compact && (
-        <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
-          Vilasat <span className="font-medium text-ink-muted">AI</span>
+        <span className="font-display text-[19px] font-bold leading-none tracking-tight text-ink">
+          Vilasat <span className="text-accent-ink">AI</span>
         </span>
       )}
       {showProduct && (
         <span
           aria-hidden="true"
-          className="ml-1 hidden border-l border-line pl-3 font-sans text-xs font-medium tracking-wide text-ink-muted lg:inline"
+          className="ml-1 hidden border-l border-line pl-3 font-sans text-[11px] font-semibold uppercase leading-none tracking-[0.14em] text-ink-muted lg:inline"
         >
           Support Intelligence
         </span>
