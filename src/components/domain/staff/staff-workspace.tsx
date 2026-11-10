@@ -261,14 +261,14 @@ export function SupportStaffWorkspace() {
       />
       <ModeBanner />
 
-      <main className="min-h-0 flex-1">
-        <div className="mx-auto grid h-full w-full max-w-[1600px] grid-cols-1 lg:grid-cols-[22rem_minmax(0,1fr)]">
+      <main className="min-h-0 flex-1 overflow-hidden">
+        <div className="mx-auto grid h-full w-full max-w-[1600px] grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[22rem_minmax(0,1fr)]">
           {/* Queue panel — full screen below lg, fixed rail above */}
           <div
             className={
               mobileView === "queue"
-                ? "flex min-w-0 flex-col border-r border-line"
-                : "hidden min-w-0 flex-col border-r border-line lg:flex"
+                ? "flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line"
+                : "hidden min-h-0 min-w-0 flex-col overflow-hidden border-r border-line lg:flex"
             }
           >
             <TicketQueue
@@ -295,8 +295,8 @@ export function SupportStaffWorkspace() {
           <div
             className={
               mobileView === "detail"
-                ? "flex min-w-0 flex-col"
-                : "hidden min-w-0 flex-col lg:flex"
+                ? "flex min-h-0 min-w-0 flex-col overflow-hidden"
+                : "hidden min-h-0 min-w-0 flex-col overflow-hidden lg:flex"
             }
           >
             <div key={selectedId ?? "none"} className="flex min-h-0 flex-1 flex-col animate-fade-in">
