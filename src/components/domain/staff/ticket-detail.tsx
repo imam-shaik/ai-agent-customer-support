@@ -1,0 +1,311 @@
+"use client";
+
+import { ArrowLeft, Bot, Check, Copy, Mail, Ticket, UserRound, Phone } from "lucide-react";
+import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { StaffTimeline } from "./staff-timeline";
+import { cn } from "@/lib/utils";
+import {
+  AI_OUTCOME_LABEL,
+  AI_OUTCOME_VARIANT,
+  type StaffTicketDetail,
+} from "@/lib/staff/ticket-view";
+import { STATUS_OPTIONS, STATUS_LABEL, type TicketStatus } from "@/lib/support/tickets";
+
+interface TicketDetailProps {
+  ticket: StaffTicketDetail | null;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+  onStatusChange: (id: string, status: TicketStatus, expected: TicketStatus) => void;
+  statusPending: boolean;
+  staleNotice: string | null;
+  onBack: () => void;
+  /** One soft pulse right after a status transition. */
+  pulse?: boolean;
+}
+
+/** Mono ticket id with click-to-copy (clipboard API; transient check). */
+function CopyTicketId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (permissions/insecure context) — the id is
+      // fully visible anyway; nothing to report.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      title="Copy ticket ID"
+      aria-label={`Copy ticket ID ${id}`}
+      className={cn(
+        "group inline-flex items-center gap-1.5 rounded-control px-1 py-0.5 font-mono text-sm font-medium text-ink",
+        "transition-colors duration-fast hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/40",
+      )}
+    >
+      {id}
+      {copied ? (
+        <Check aria-hidden="true" className="size-3.5 text-success" />
+      ) : (
+        <Copy
+          aria-hidden="true"
+          className="size-3.5 text-ink-muted opacity-0 transition-opacity duration-fast group-hover:opacity-100"
+        />
+      )}
+      <span aria-live="polite" className="sr-only">
+        {copied ? "Ticket ID copied" : ""}
+      </span>
+    </button>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6 md:px-6" aria-hidden="true">
+      <Skeleton className="h-6 w-48" />
+      <Skeleton className="h-5 w-3/4" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Skeleton className="h-24 w-full rounded-card" />
+        <Skeleton className="h-24 w-full rounded-card" />
+      </div>
+      <Skeleton className="h-20 w-full rounded-card" />
+      <Skeleton className="h-32 w-full rounded-card" />
+    </div>
+  );
+}
+
+/**
+ * Ticket detail: answers "what did the customer ask, what did the AI
+ * already try, why was this escalated" from stored server data only.
+ * Status changes are sent to the API and applied from its response; the
+ * UI never assumes a local transition succeeded.
+ */
+export function TicketDetail({
+  ticket,
+  loading,
+  error,
+  onRetry,
+  onStatusChange,
+  statusPending,
+  staleNotice,
+  onBack,
+  pulse = false,
+}: TicketDetailProps) {
+  if (!ticket && loading) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="shrink-0 border-b border-line px-4 py-4 md:px-6">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="mt-3 h-6 w-2/3" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <DetailSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  if (!ticket && error) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <ErrorState
+          title="Couldn't load this ticket"
+          description="The ticket service didn't respond. Nothing was changed — try again."
+          onRetry={onRetry}
+        />
+      </div>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <EmptyState
+          icon={<Ticket className="size-5" />}
+          title="Select a ticket"
+          description="Choose an escalation from the queue to see the customer, the conversation, and why it was escalated."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Detail header */}
+      <header className="shrink-0 border-b border-line bg-canvas/85 px-4 py-4 backdrop-blur-md md:px-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="lg:hidden">
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              <ArrowLeft aria-hidden="true" />
+              Queue
+            </Button>
+          </span>
+          <CopyTicketId id={ticket.id} />
+          <StatusBadge status={ticket.status} pulse={pulse} />
+          {ticket.priority === "high" && (
+            <Badge variant="accent" className="uppercase">
+              High priority
+            </Badge>
+          )}
+          <span className="ml-auto text-[11px] text-ink-muted">
+            Created {ticket.createdAt}
+          </span>
+        </div>
+
+        <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+          Customer-provided issue summary
+        </p>
+        <h2 className="mt-0.5 font-display text-lg font-semibold tracking-tight text-ink">
+          {ticket.summary}
+        </h2>
+
+        {/* Status management */}
+        <div
+          role="group"
+          aria-label="Change ticket status"
+          aria-busy={statusPending}
+          className="mt-3 flex flex-wrap items-center gap-2"
+        >
+          <span className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+            Status
+          </span>
+          {STATUS_OPTIONS.map((option) => {
+            const active = ticket.status === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={active}
+                disabled={statusPending}
+                onClick={() => onStatusChange(ticket.id, option.value, ticket.status)}
+                className={cn(
+                  "rounded-control border px-3 py-1.5 text-[13px] font-medium transition-colors duration-fast",
+                  "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-default",
+                  active
+                    ? "border-accent-border bg-accent-soft text-accent-ink"
+                    : "border-line bg-surface-1 text-ink-secondary hover:border-line-strong hover:text-ink disabled:opacity-60"
+                )}
+              >
+                {STATUS_LABEL[option.value]}
+              </button>
+            );
+          })}
+          {statusPending && (
+            <span role="status" className="text-[11px] text-ink-muted">
+              Updating status…
+            </span>
+          )}
+        </div>
+
+        {staleNotice && (
+          <p
+            role="alert"
+            className="mt-3 rounded-control border border-warning-border bg-warning-soft p-2.5 text-xs leading-relaxed text-warning-ink"
+          >
+            {staleNotice}
+          </p>
+        )}
+      </header>
+
+      {/* Detail body */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
+          {/* At-a-glance: the three questions staff need answered */}
+          <section aria-label="Escalation context" className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-card border border-line bg-surface-1 p-4">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+                  <UserRound aria-hidden="true" className="size-3.5" />
+                  Customer
+                </p>
+                <p className="mt-2 text-sm font-medium text-ink">{ticket.customer.name}</p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-secondary">
+                  <Mail aria-hidden="true" className="size-3.5 text-ink-muted" />
+                  {ticket.customer.email}
+                </p>
+                {ticket.customer.phone && (
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-secondary">
+                    <Phone aria-hidden="true" className="size-3.5 text-ink-muted" />
+                    {ticket.customer.phone}
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-card border border-warning-border bg-warning-soft p-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-warning-ink">
+                  Escalation reason (customer request)
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-ink">
+                  {ticket.escalationReason}
+                </p>
+              </div>
+
+              {/* Deterministic escalation context — no generated summary */}
+              <div className="rounded-card border border-info-border bg-info-soft p-4">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-info-ink">
+                  <Bot aria-hidden="true" className="size-3.5" />
+                  AI outcome at escalation
+                </p>
+                {ticket.aiOutcome ? (
+                  <div className="mt-2">
+                    <Badge variant={AI_OUTCOME_VARIANT[ticket.aiOutcome]}>
+                      {AI_OUTCOME_LABEL[ticket.aiOutcome]}
+                    </Badge>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                    No assistant reply was stored before this ticket was created.
+                  </p>
+                )}
+                <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+                  Derived from the last stored assistant reply. Not a generated summary — opening
+                  this ticket never runs the agent.
+                </p>
+              </div>
+            </div>
+
+            {/* Original question */}
+            <div className="rounded-card border border-line bg-surface-1 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+                Original question
+              </p>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink">
+                {ticket.originalQuestion}
+              </p>
+            </div>
+          </section>
+
+          {/* Conversation */}
+          <section aria-labelledby="transcript-heading" className="mt-8">
+            <div className="mb-4 flex items-center justify-between gap-3 border-t border-line pt-6">
+              <h3
+                id="transcript-heading"
+                className="text-[11px] font-medium uppercase tracking-wide text-ink-muted"
+              >
+                Conversation
+              </h3>
+              <span className="text-[11px] tabular-nums text-ink-muted">
+                {ticket.messageCount} message{ticket.messageCount === 1 ? "" : "s"} ·{" "}
+                {ticket.eventCount} event{ticket.eventCount === 1 ? "" : "s"}
+              </span>
+            </div>
+            <StaffTimeline rows={ticket.messages} customerName={ticket.customer.name} />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
