@@ -67,7 +67,19 @@ const EXTENSION_ATTR_CLEANUP_SCRIPT = `(function(){try{var a=["bis_skin_checked"
  * frames — client.ts converts its own network failures into typed
  * ApiErrors handled in-component — so they keep surfacing normally.
  */
-const EXTENSION_ERROR_FILTER_SCRIPT = `(function(){try{var ext=/^(chrome|moz)-extension:\\/\\//;function fromExtension(r){if(!r){return false}if(typeof r.stack==="string"&&ext.test(r.stack)){return true}if(typeof r.message==="string"&&r.message.indexOf("chrome-extension://")!==-1){return true}return false}window.addEventListener("unhandledrejection",function(e){if(fromExtension(e.reason)){e.preventDefault()}});window.addEventListener("error",function(e){if(fromExtension(e.error)||ext.test(e.filename||"")){e.preventDefault()}},true)}catch(e){}})();`;
+const EXTENSION_ERROR_FILTER_SCRIPT = `(function(){try{function fromExtension(r){if(!r){return false}var s=typeof r.stack==="string"?r.stack:"";if(s.indexOf("chrome-extension://")!==-1||s.indexOf("moz-extension://")!==-1){return true}if(typeof r.message==="string"&&r.message.indexOf("chrome-extension://")!==-1){return true}return false}window.addEventListener("unhandledrejection",function(e){if(fromExtension(e.reason)){e.preventDefault()}});window.addEventListener("error",function(e){if(fromExtension(e.error)||(typeof e.filename==="string"&&e.filename.indexOf("extension://")!==-1)){e.preventDefault()}},true)}catch(e){}})();`;
+
+/**
+ * Snapshot the PRISTINE window.fetch before any extension content script
+ * can patch it (this inline script runs during HTML parsing, before
+ * document_idle extension hooks). Investigated live: a fetch-hooking
+ * extension was breaking EVERY page request ("Failed to fetch") while
+ * the backend was verifiably healthy (curl + CORS both fine), putting
+ * the whole staff queue into its offline state. The snapshot lets the
+ * API client (src/lib/api/client.ts) bypass the patched fetch entirely;
+ * with no extension present the snapshot IS the native fetch — a no-op.
+ */
+const EXTENSION_FETCH_SNAPSHOT_SCRIPT = `(function(){try{if(typeof window.fetch==="function"&&!window.__vilasatPristineFetch){window.__vilasatPristineFetch=window.fetch.bind(window)}}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -83,6 +95,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           not caused by application code. */}
       <body suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: EXTENSION_FETCH_SNAPSHOT_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: EXTENSION_ATTR_CLEANUP_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: EXTENSION_ERROR_FILTER_SCRIPT }} />
         <Providers>{children}</Providers>

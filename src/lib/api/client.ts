@@ -72,6 +72,7 @@ export interface ApiCitation extends Citation {
 export type AgentReply =
   | { kind: "grounded"; text: string; citations: ApiCitation[] }
   | { kind: "clarifying"; text: string; options: string[] }
+  | { kind: "greeting"; text: string; options: string[] }
   | {
       kind: "unsupported";
       text: string;
@@ -399,6 +400,26 @@ export function toUiStatus(status: ApiTicketStatus): UiTicketStatus {
 /* Transport                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The fetch implementation for every API call.
+ *
+ * layout.tsx snapshots the PRISTINE window.fetch before extension
+ * content scripts patch it (window.__vilasatPristineFetch). Investigated
+ * live: a fetch-hooking browser extension broke EVERY request with
+ * "Failed to fetch" while the backend was verifiably healthy — routing
+ * through the snapshot bypasses the patched fetch entirely. Falls back
+ * to the ambient fetch (SSR, or no snapshot script).
+ */
+function getFetch(): typeof fetch {
+  if (typeof window !== "undefined") {
+    const pristine = (window as {
+      __vilasatPristineFetch?: typeof fetch;
+    }).__vilasatPristineFetch;
+    if (typeof pristine === "function") return pristine;
+  }
+  return fetch;
+}
+
 async function request<T>(
   path: string,
   init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
@@ -417,7 +438,7 @@ async function request<T>(
   let response: Response;
 
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    response = await getFetch()(`${BASE_URL}${path}`, {
       method,
       headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
