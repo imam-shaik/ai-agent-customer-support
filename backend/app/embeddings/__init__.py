@@ -51,6 +51,8 @@ def get_embedding_provider(settings=None) -> EmbeddingProvider:
             dimensions=settings.embedding_dimensions,
             timeout_seconds=settings.embedding_timeout_seconds,
             batch_size=settings.embedding_batch_size,
+            query_input_type=settings.embedding_query_input_type,
+            passage_input_type=settings.embedding_passage_input_type,
         )
 
     raise EmbeddingProviderError(
@@ -61,10 +63,11 @@ def get_embedding_provider(settings=None) -> EmbeddingProvider:
 def ensure_configured_dimensions(settings, provider: EmbeddingProvider) -> None:
     """Fail loudly when config, schema and provider dimensions disagree.
 
-    The schema column is vector(2048) (migration c4f8a1d6e2b9); changing
-    EMBEDDING_DIMENSIONS without a migration — or a provider returning a
-    different width — must stop the run before any data is written or any
-    misleading ranking is returned.
+    The schema column width is fixed by the latest pgvector migration
+    (vector(4096), migration b7e2f9a4c1d3); changing EMBEDDING_DIMENSIONS
+    without a migration — or a provider returning a different width — must
+    stop the run before any data is written or any misleading ranking is
+    returned.
     """
     from app.models.entities import VECTOR_DIMENSIONS
 

@@ -957,6 +957,9 @@ class TestGreeting:
     and no escalation is attached (it is not a dead end)."""
 
     def test_small_talk_returns_typed_greeting(self, monkeypatch: pytest.MonkeyPatch):
+        """A phrasing the deterministic screen does NOT catch ("are you a
+        robot?") — the model's small_talk verdict still produces the typed
+        greeting with exactly one assessment call."""
         _patch_retrieval(monkeypatch, (_candidate(1),))  # would poison a retrieval
         provider = ScriptedProvider(
             {
@@ -972,7 +975,7 @@ class TestGreeting:
         )
         _patch_provider(monkeypatch, provider)
 
-        decision = run_agent_turn(None, question="how are you?")
+        decision = run_agent_turn(None, question="are you a robot?")
 
         assert decision.kind == DECISION_GREETING
         assert decision.text == GREETING_TEXT
@@ -985,6 +988,74 @@ class TestGreeting:
         )
         # Exactly one LLM call (assessment) — no retrieval, no generation.
         assert _tasks(provider) == [TASK_ASSESSMENT]
+
+    def test_bare_greeting_short_circuits_with_zero_llm_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Obvious greetings never depend on model behavior: the
+        deterministic screen answers them BEFORE any LLM call. (Live
+        regression 2026-11-10: the assessment misread "hi hello", retrieval
+        ran, and the customer saw a confusing dead end.)"""
+        _patch_retrieval(monkeypatch, (_candidate(1),))  # would poison retrieval
+        provider = ScriptedProvider(
+            {
+                # Would classify as NOT small talk — the screen must win.
+                TASK_ASSESSMENT: json.dumps(
+                    {"ambiguous": False, "clarification": "", "options": []}
+                )
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        for question in ("hi hello", "Hello!", "hey!!", "thanks", "good morning"):
+            decision = run_agent_turn(None, question=question)
+
+            assert decision.kind == DECISION_GREETING, question
+            assert decision.text == GREETING_TEXT
+            assert decision.category == "small_talk"
+
+        assert _tasks(provider) == []  # zero LLM calls across all five
+
+    def test_support_question_starting_with_hi_is_not_small_talk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A real question that merely STARTS with "hi" must still flow to
+        the model pipeline — the screen is deliberately conservative."""
+        _patch_retrieval(
+            monkeypatch,
+            (_candidate(1, content="Password resets use a 30 minute link."),),
+        )
+        provider = ScriptedProvider(
+            {
+                TASK_ASSESSMENT: json.dumps(
+                    {"ambiguous": False, "clarification": "", "options": []}
+                ),
+                TASK_EVIDENCE: json.dumps(
+                    {"verdict": "sufficient", "conflicting_refs": []}
+                ),
+                TASK_GENERATION: json.dumps(
+                    {
+                        "answer": "According to Account Access & Recovery: request a reset link from the sign-in page.",
+                        "citation_ids": ["E1"],
+                    }
+                ),
+                TASK_SUPPORT: json.dumps({"supported": True, "category": "supported"}),
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        decision = run_agent_turn(
+            None, question="hi, the password reset link did not arrive"
+        )
+
+        assert decision.kind == DECISION_GROUNDED
+        # One candidate → the conflict verdict (call #2) is impossible and
+        # skipped; assessment, generation and support still all run.
+        assert _tasks(provider) == [
+            TASK_ASSESSMENT,
+            TASK_GENERATION,
+            TASK_SUPPORT,
+        ]
 
     def test_small_talk_with_payload_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
         """A small-talk flag plus any decision payload is malformed model

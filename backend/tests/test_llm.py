@@ -457,7 +457,9 @@ class TestFourTaskPrompts:
         # 8b-5: generation EXPLAINS (own words, numbered steps, full use
         # of the evidence); the support judge accepts rephrasing and only
         # rejects NEW facts — detailed answers survive signal D.
-        assert INSTRUCTIONS_VERSION == "8b-5"
+        # 8b-6: numbered steps are emitted one per line (JSON \n escapes)
+        # so the renderer can show real step structure.
+        assert INSTRUCTIONS_VERSION == "8b-6"
 
 
 # ---------------------------------------------------------------------------

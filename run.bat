@@ -86,6 +86,7 @@ pushd "%BACKEND%"
 
 echo [3/6] Applying database migrations...
 "%PY%" -m alembic upgrade head || (popd & goto :fail)
+"%PY%" scripts\update_knowledge.py || (popd & goto :fail)
 popd
 
 rem ----------------------------------------------------------

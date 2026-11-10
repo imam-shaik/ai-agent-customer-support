@@ -46,7 +46,7 @@ os.environ["NVIDIA_API_KEY"] = ""
 # migrated schema (vector(2048)) for the factory's dimension guard.
 os.environ["EMBEDDING_QUERY_PREFIX"] = ""
 os.environ["EMBEDDING_PASSAGE_PREFIX"] = ""
-os.environ["EMBEDDING_DIMENSIONS"] = "2048"
+os.environ["EMBEDDING_DIMENSIONS"] = "4096"
 # Staff reply email dispatch must also be hermetic: a developer's
 # backend/.env must never make tests send real email (and the honest
 # not-configured state is what the reply tests assert).

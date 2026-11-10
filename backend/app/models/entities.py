@@ -13,7 +13,7 @@ Design notes (Phase 5 → Phase 6):
   chunks; historical citations survive via ON DELETE SET NULL on
   chunk_id plus their own evidence snapshot.
 - Embeddings (Phase 7): document_chunks gains native pgvector storage
-  (vector(2048)) plus the identity metadata that keeps vectors honest -
+  (vector(4096)) plus the identity metadata that keeps vectors honest -
   which model produced them and a content-derived fingerprint that never
   depends on row ids. Vectors are written ONLY by the explicit indexing
   workflow, never during search.
@@ -40,12 +40,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 # Native pgvector dimension, fixed by the selected embedding model
-# (nemotron-3-embed-1b → 2048). The original model (NV-EmbedQA-E5-v5, 1024)
-# reached end-of-life on NVIDIA's API (HTTP 410, verified 2026-11-10), so
-# the schema migrated vector(1024) → vector(2048) with all vectors cleared
-# for re-embedding (migration c4f8a1d6e2b9). A different-dimension model
-# requires a NEW migration, never a silent mismatch.
-VECTOR_DIMENSIONS = 2048
+# (nemotron-3.5-embed-8b → 4096). The previous live model (nemotron-3-embed-1b,
+# 2048) produced a nearly flat cosine band — on-topic and unrelated pairs
+# scored within ~0.04 — so the schema migrated vector(2048) → vector(4096)
+# with all vectors cleared for re-embedding (migration b7e2f9a4c1d3).
+# A different-dimension model requires a NEW migration, never a silent
+# mismatch.
+VECTOR_DIMENSIONS = 4096
 
 
 def _uuid() -> str:
@@ -145,7 +146,7 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     __table_args__ = (
         # No ANN index on `embedding`: pgvector's HNSW caps at 2000
-        # dimensions and the live model (nemotron-3-embed-1b) emits 2048.
+        # dimensions and the live model (nemotron-3.5-embed-8b) emits 4096.
         # At MVP corpus scale pgvector's exact sequential cosine scan is
         # correct and fast, so search runs without an index. Revisit with a
         # halfvec expression index (or a <=2000-dim model) only if the

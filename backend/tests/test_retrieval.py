@@ -228,7 +228,7 @@ class TestServiceValidation:
 
         class SpyProvider(FakeEmbeddingProvider):
             def __init__(self) -> None:
-                super().__init__(dimensions=2048)
+                super().__init__(dimensions=4096)
                 self.embed_calls: list[str] = []
 
             def embed_text(self, text: str) -> list[float]:
@@ -344,11 +344,11 @@ class TestHttpContract:
 
 
 class TestVectorSchema:
-    def test_native_vector_column_2048_and_no_hnsw_at_this_width(
+    def test_native_vector_column_4096_and_no_hnsw_at_this_width(
         self, db_session, knowledge_indexed
     ):
-        # pgvector's HNSW index caps at 2000 dimensions, so vector(2048)
-        # (nemotron-3-embed-1b) cannot be HNSW-indexed. At MVP corpus scale
+        # pgvector's HNSW index caps at 2000 dimensions, so vector(4096)
+        # (nemotron-3.5-embed-8b) cannot be HNSW-indexed. At MVP corpus scale
         # the exact sequential cosine scan is correct and fast, so no ANN
         # index exists on the column. Revisit (halfvec expression index or a
         # <=2000-dim model) only if the corpus grows enough to need it.
@@ -359,7 +359,7 @@ class TestVectorSchema:
                 "AND indexname = 'ix_document_chunks_embedding_hnsw'"
             )
         ).fetchone()
-        assert index_row is None  # HNSW deliberately absent at 2048 dims
+        assert index_row is None  # HNSW deliberately absent at 4096 dims
 
         column_row = db_session.execute(
             text(
@@ -369,7 +369,7 @@ class TestVectorSchema:
             )
         ).fetchone()
         assert column_row is not None
-        assert column_row[0] == "vector(2048)"  # native pgvector type, not JSON
+        assert column_row[0] == "vector(4096)"  # native pgvector type, not JSON
 
         extension_row = db_session.execute(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")

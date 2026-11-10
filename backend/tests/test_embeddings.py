@@ -11,6 +11,7 @@ Split by capability:
 """
 
 import math
+import json
 
 import httpx
 import pytest
@@ -100,14 +101,14 @@ class TestDimensionGuards:
             ensure_configured_dimensions(settings, provider)
 
     def test_provider_must_match_settings_dimension(self):
-        settings = Settings(embedding_dimensions=2048)
+        settings = Settings(embedding_dimensions=4096)
         provider = FakeEmbeddingProvider(dimensions=512)
         with pytest.raises(EmbeddingProviderError, match="512"):
             ensure_configured_dimensions(settings, provider)
 
     def test_matching_dimensions_pass(self):
-        settings = Settings(embedding_dimensions=2048)
-        ensure_configured_dimensions(settings, FakeEmbeddingProvider(dimensions=2048))
+        settings = Settings(embedding_dimensions=4096)
+        ensure_configured_dimensions(settings, FakeEmbeddingProvider(dimensions=4096))
 
 
 class TestBatchValidation:
@@ -194,6 +195,54 @@ class TestOpenAICompatibleProvider:
         assert provider.embed_text("hello") == [0.5] * 1024
         assert provider.model_name == MODEL
         assert provider.dimensions == 1024
+
+    def test_asymmetric_roles_wire_input_type_per_call(self):
+        """Queries and passages carry their configured input_type — the
+        asymmetric models require it, and mixing the roles degrades them."""
+        seen: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content.decode("utf-8"))
+            seen.append(payload)
+            count = len(payload["input"])
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"index": i, "embedding": [0.5] * 1024} for i in range(count)
+                    ]
+                },
+            )
+
+        provider = OpenAICompatibleEmbeddingProvider(
+            model=MODEL,
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=KEY,
+            dimensions=1024,
+            timeout_seconds=5.0,
+            batch_size=4,
+            query_input_type="query",
+            passage_input_type="passage",
+            transport=httpx.MockTransport(handler),
+        )
+        provider.embed_text("How do I reset my password?")
+        provider.embed_batch(["chunk one", "chunk two"])
+        assert [payload.get("input_type") for payload in seen] == [
+            "query",
+            "passage",
+        ]
+
+    def test_symmetric_model_sends_no_input_type(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(
+                200, json={"data": [{"index": 0, "embedding": [0.5] * 1024}]}
+            )
+
+        seen: list[dict] = []
+        provider = _provider(httpx.MockTransport(handler))
+        provider.embed_text("hello")
+        assert seen[0].get("input_type") is None
 
     def test_http_error_maps_to_provider_error(self):
         def handler(request: httpx.Request) -> httpx.Response:

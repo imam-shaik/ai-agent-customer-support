@@ -76,25 +76,29 @@ independently):
 ```ini
 # --- Embeddings (real semantic search) ---
 EMBEDDING_PROVIDER=nvidia
-EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
-EMBEDDING_DIMENSIONS=2048
+EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-8b
+EMBEDDING_QUERY_INPUT_TYPE=query
+EMBEDDING_PASSAGE_INPUT_TYPE=passage
+EMBEDDING_DIMENSIONS=4096
+EMBEDDING_BATCH_SIZE=1
 EMBEDDING_API_KEY=nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   ← paste your key here
 
 # --- Chat model (real answers) ---
 LLM_PROVIDER=nvidia
-LLM_MODEL=deepseek-ai/deepseek-v4.1-flash
+LLM_MODEL=nvidia/nemotron-3.5-bolt-e4b
 NVIDIA_API_KEY=nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       ← same key is fine
 ```
 
 Where to get a key: sign in at **<https://build.nvidia.com>**, open any
-model page, choose **"Get API Key"** — the key looks like
+model page, choose **"Get AI Key"** — the key looks like
 `nvapi-…` and works for both the embedding and the chat endpoint
 (`https://integrate.api.nvidia.com/v1`).
 
-Leave the prefix lines as the template ships them —
-`nvidia/nemotron-3-embed-1b` **requires** `query:` / `passage:` role
-prefixes (they are already set in `.env.example`; removing them causes a
-large drop in retrieval accuracy).
+Leave the `EMBEDDING_*` lines as the template ships them —
+`nvidia/nemotron-3.5-embed-8b` is an **asymmetric** model: retrieval
+questions are embedded with `input_type=query` and indexed chunks with
+`input_type=passage` (already set in `.env.example`; swapping or removing
+them causes a large drop in retrieval accuracy).
 
 ### 2.4 Activate the keys (two ways)
 
@@ -124,7 +128,7 @@ cd backend
 ```
 
 From here on, customer questions are answered by the real models with
-real citations. (Live turns make four model calls and take ~30–60 s; the
+real citations. (Live turns make 3–4 model calls and take ~30–60 s; the
 Demo toggle gives instant deterministic answers at any time.)
 
 ### 2.6 Security rules for `.env`
@@ -152,7 +156,7 @@ if you move the backend to another port. **No keys go here.**
 | Mode | How | Behavior |
 | --- | --- | --- |
 | Demo | Header **Demo** button (local/dev; refused in production) | Deterministic lexical retrieval over the stored help-article chunks + deterministic generator. Works with no keys and no live index; no network; no writes to live embeddings. |
-| Live providers | Header **Live** button (default) + keys in `backend\.env` | Real NVIDIA embeddings (`nvidia/nemotron-3-embed-1b`, 2048-d) + real chat model (`nvidia/nemotron-3.5-super-vl-120b-a12b`). |
+| Live providers | Header **Live** button (default) + keys in `backend\.env` | Real NVIDIA embeddings (`nvidia/nemotron-3.5-embed-8b`, 4096-d, asymmetric) + real chat model (`nvidia/nemotron-3.5-bolt-e4b`). |
 | Live without keys | Default when no keys are configured | Typed `503` envelopes and a warning banner instead of fabricated AI output. |
 
 The switch and the mode banner always tell you honestly which state you
@@ -252,7 +256,7 @@ ai-agent-customer-support/
     │   ├── 📂 repositories/       📄 conversation · document · ticket
     │   ├── 📂 schemas/            📄 chat · ticket · document · feedback · agent
     │   │                          📄 retrieval · provider_settings · common
-    │   ├── 📂 models/             📄 entities.py   ← SQLAlchemy models (pgvector 2048)
+    │   ├── 📂 models/             📄 entities.py   ← SQLAlchemy models (pgvector 4096)
     │   ├── 📂 db/                 📄 session.py · base.py · seed.py
     │   └── 📂 core/               📄 config.py · logging.py · exceptions.py · text.py
     │
@@ -295,7 +299,7 @@ ai-agent-customer-support/
 2. **Ingestion**: seeded and processed at startup through the real
    pipeline (validate → normalize → sections → 1200/120 chunking).
 3. **Indexing**: explicit step only (`scripts/index_knowledge.py`), real
-   or fake embeddings written to pgvector `vector(2048)` columns.
+   or fake embeddings written to pgvector `vector(4096)` columns.
 4. **Retrieval**: approved-scope-only semantic search (the filter lives
    in the SQL `WHERE` clause); the challenge fixture is unreachable
    through chat and the HTTP API.
@@ -358,14 +362,21 @@ cd backend
 
 | File | Topic |
 | --- | --- |
-| `knowledge/approved/account-access.md` | password reset, locked accounts, 2FA |
-| `knowledge/approved/billing.md` | billing cycles, payment methods, invoices |
-| `knowledge/approved/subscriptions.md` | upgrades, seats, pause/cancel |
-| `knowledge/approved/getting-started.md` | workspace creation, invites, imports |
-| `knowledge/approved/integrations.md` | Slack, email notifications, webhooks |
-| `knowledge/approved/security.md` | encryption, backups, GDPR |
-| `knowledge/approved/data-retention.md` | 30-day retention, deletion, export |
+| `knowledge/approved/account-access.md` | password reset, locked accounts, 2FA, email changes, sessions, lost authenticator |
+| `knowledge/approved/billing.md` | plans & pricing, billing cycles, payment methods, invoices, failed payments, refunds, taxes, billing contacts |
+| `knowledge/approved/subscriptions.md` | upgrades, seats, pause/cancel, trial end, switching cycle, downgrades |
+| `knowledge/approved/getting-started.md` | workspace creation, roles & permissions, invites, imports, browsers, first conversation |
+| `knowledge/approved/integrations.md` | Slack, email notifications, webhooks + events, API tokens |
+| `knowledge/approved/security.md` | encryption, backups, GDPR, SSO, audit log, data residency, vulnerability reports |
+| `knowledge/approved/data-retention.md` | 30-day retention, deletion, export contents, removed members, restores |
 | `knowledge/challenge/legacy-retention-notice.md` | deliberately conflicting 90-day notice (never in normal retrieval) |
+
+Knowledge files are re-ingested on every start (`run.bat` runs
+`scripts/update_knowledge.py` for changed files, then
+`scripts/index_knowledge.py` embeds the new chunks). To apply edits
+without restarting: from `backend/` run
+`python scripts/update_knowledge.py` then
+`python scripts/index_knowledge.py`.
 
 **Try in order:**
 
@@ -412,12 +423,15 @@ cd backend
   Demo reads stored chunk text and never rewrites the live pgvector index.
 - The conflicting fixture is deliberately unreachable from customer chat;
   reproduce conflict via the test suite (see §6.1).
-- Live turns make **four model calls** and take ~30–60 s; the Demo
+- Live turns make **3–4 model calls** (greetings are answered by a
+  deterministic screen with zero calls) and take ~30–60 s; the Demo
   toggle gives instant answers.
-- The relevance threshold `AGENT_MIN_EVIDENCE_RELEVANCE` was calibrated
-  for the fake provider; with live nemotron embeddings it is permissive
-  (unrelated-pair cosine baseline is high) — the coverage gate and the
-  support check carry the guessing protection. Recalibrate before any
+- The relevance threshold `AGENT_MIN_EVIDENCE_RELEVANCE` is deliberately
+  permissive; the coverage gate and the support check carry the guessing
+  protection (the old `nemotron-3-embed-1b` baseline made unrelated pairs
+  score ~0.76 — its replacement, `nemotron-3.5-embed-8b`, separates
+  on-topic from unrelated pairs cleanly, verified with
+  `backend/scripts/probe_embedding_models.py`).
   production deployment.
 - No streaming/SSE progress, no real-time staff queue, no committed
   frontend E2E harness.

@@ -61,14 +61,14 @@ Next.js Frontend  ──HTTP/JSON──►  FastAPI routes (app/api)
 | --- | --- |
 | `app/api` | HTTP contract: paths, Pydantic validation, status codes |
 | `app/schemas` | Request/response shapes (camelCase, matching the frontend contracts); `agent.py` holds the strict internal LLM output schemas (generation + assessment + evidence/support verdicts) |
-| `app/services` | Business rules + `agent_service` (decision orchestrator: guard → assessment → gates → generation → support) + `evidence_assessment` (deterministic gates + verdict parsing) + `conversation_context` (bounded context + working query) + `indexing_service` + `retrieval_service` + `evidence_context` (E1..En builder) |
+| `app/services` | Business rules + `agent_service` (decision orchestrator: guard → small-talk screen → assessment → gates → generation → support) + `evidence_assessment` (deterministic gates + verdict parsing) + `conversation_context` (bounded context + working query) + `indexing_service` + `retrieval_service` + `evidence_context` (E1..En builder) |
 | `app/llm` | LLM provider boundary: trusted prompt rendering for the FOUR narrow tasks + `complete()` — real (OpenAI-compatible HTTP) + deterministic task-aware stub |
 | `app/embeddings` | Provider boundary: `embed_text` / `embed_batch` — real (OpenAI-compatible HTTP) + deterministic test fake |
 | `app/repositories` | Reads/writes only — no business logic |
-| `app/models` | The tables (Alembic-managed), incl. native `vector(2048)` columns + HNSW index |
+| `app/models` | The tables (Alembic-managed), incl. the native `vector(4096)` embedding column (no HNSW index — above pgvector's 2000-dim cap) |
 | `app/core` | Config, logging, the single error envelope |
 | `app/db` | Engine/session wiring + idempotent dev seed |
-| `scripts/` | `dev_db.py` (embedded Postgres), `index_knowledge.py` (explicit indexing), `smoke.py` |
+| `scripts/` | `dev_db.py` (embedded Postgres), `index_knowledge.py` (explicit indexing), `update_knowledge.py` (re-ingest changed knowledge files), `probe_embedding_models.py` (live model evaluation), `smoke.py` |
 
 ## Requirements
 
@@ -131,17 +131,17 @@ credentials and documented as skipped when absent.
 | `CORS_ORIGINS` | `http://localhost:3000,…` | Comma-separated explicit origins; wildcards are rejected at startup |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
 | `EMBEDDING_PROVIDER` | `nvidia` | `nvidia` = real endpoint; `fake` = test-only |
-| `EMBEDDING_MODEL` | `nvidia/nemotron-3-embed-1b` | Model id sent to the API **and stored on every vector**. The original (`nvidia/nv-embedqa-e5-v5`) reached EOL on NVIDIA's API (410, verified 2026-11-10) |
+| `EMBEDDING_MODEL` | `nvidia/nemotron-3.5-embed-8b` | Model id sent to the API **and stored on every vector**. History (probed live, `scripts/probe_embedding_models.py`): `nv-embedqa-e5-v5` EOL (410); `nemotron-3-embed-1b` served but its cosine band was nearly flat (~0.04 margin between on-topic and unrelated pairs) — replaced for retrieval quality |
 | `EMBEDDING_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Any OpenAI-compatible endpoint (swap to a self-hosted NIM later) |
 | `EMBEDDING_API_KEY` | *(empty)* | Bearer token; never committed, never logged; absence blocks indexing + retrieval with an explicit 503/exit 1 |
-| `EMBEDDING_QUERY_PREFIX` | `""` | Role prefixes for models that need them (E5 family); `nemotron-3-embed-1b` is symmetric and needs none |
-| `EMBEDDING_PASSAGE_PREFIX` | `""` | Applied at indexing time |
-| `EMBEDDING_DIMENSIONS` | `2048` | Must equal the `vector(2048)` schema column; mismatches refuse to run |
+| `EMBEDDING_QUERY_INPUT_TYPE` / `EMBEDDING_PASSAGE_INPUT_TYPE` | `query` / `passage` | `input_type` request parameter for ASYMMETRIC models — queries and passages are embedded with their role. Unset (empty) for symmetric models, which never receive the parameter |
+| `EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` | `""` | Text role prefixes for E5-family models; the current model takes `input_type` instead and needs none |
+| `EMBEDDING_DIMENSIONS` | `4096` | Must equal the `vector(4096)` schema column; mismatches refuse to run |
 | `EMBEDDING_TIMEOUT_SECONDS` | `30` | Per embeddings request |
-| `EMBEDDING_BATCH_SIZE` | `16` | Chunks per embedding request |
+| `EMBEDDING_BATCH_SIZE` | `1` | Chunks per embedding request — the live endpoint 500s on multi-item batches for the 3.5 models (verified 2026-11-10) |
 | `RETRIEVAL_TOP_K_DEFAULT` / `RETRIEVAL_TOP_K_MAX` | `5` / `20` | Explicit top-k bounds (no magic numbers) |
 | `RETRIEVAL_MAX_QUERY_CHARS` | `2000` | Query length limit (422 beyond it) |
-| `RETRIEVAL_MIN_COSINE_SIMILARITY` | `0.0` | Live nemotron baseline cosine runs high (~0.76 unrelated) → no cutoff by default; sufficiency is judged downstream |
+| `RETRIEVAL_MIN_COSINE_SIMILARITY` | `0.0` | No cutoff by default; sufficiency is judged downstream by the gates |
 | `LLM_PROVIDER` | `stub` | `stub` = deterministic dev/test generator (refused in `production`); `nvidia` = real chat endpoint |
 | `LLM_MODEL` | `nvidia/nemotron-3.5-bolt-e4b` | Chat model id, verified live with the strict-JSON contract and deterministic at temperature 0.0. Known-bad: `deepseek-ai/deepseek-v4.1-flash` (listed by `/models` but inference hangs indefinitely, verified 2026-11-10); `meta/llama-3.3-70b-instruct` (EOL, 410); `nvidia/nemotron-3.5-super-vl-120b-a12b` (reasoning model — non-deterministic at temperature 0) |
 | `LLM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Any OpenAI-compatible chat endpoint |
@@ -149,9 +149,10 @@ credentials and documented as skipped when absent.
 | `LLM_TIMEOUT_SECONDS` | `60` | Per chat-completion request |
 | `LLM_TEMPERATURE` | `0.0` | Grounded structured output wants determinism |
 | `LLM_MAX_COMPLETION_TOKENS` | `4096` | Endpoint cap is 4096; validated `[1, 4096]`. Keep at the cap for reasoning models (their `reasoning_tokens` consume this budget — a smaller value truncates answers) |
-| `LLM_MAX_EVIDENCE` | `5` | Max evidence items sent to the model per turn (= retrieval top-k) |
+| `LLM_MAX_EVIDENCE` | `10` | Max evidence items sent to the model per turn (matches the agent's retrieval pool) |
 | `LLM_EVIDENCE_MAX_CHARS` | `1200` | Per-item evidence text cap (≈ chunk size) — prompts stay bounded |
-| `AGENT_MIN_EVIDENCE_RELEVANCE` | `0.05` | Decision signal A: best candidate's cosine must reach this bar. Calibrated for the fake embedding provider (0.05–0.17). Live nemotron-3-embed-1b measures ~0.72 for on-topic queries vs ~0.76 unrelated baseline, so this bar is currently permissive — the coverage gate and support check carry the protection. Re-tune from the live distribution when convenient |
+| `AGENT_RETRIEVAL_TOP_K` | `12` | Candidate pool the agent retrieves per turn — wider than the public retrieval default (5) because ranking alone can miss on-topic chunks; the gates still decide sufficiency |
+| `AGENT_MIN_EVIDENCE_RELEVANCE` | `0.05` | Decision signal A: best candidate's cosine must reach this bar. Deliberately permissive — the coverage gate and support check carry the protection. Live 3.5-embed-8b measures ~0.47–0.77 for on-topic queries vs ~0.24–0.39 unrelated |
 | `AGENT_MIN_COVERAGE_RATIO` | `0.75` | Decision signal B: fraction of the question's material words covered by the evidence; below → typed `uncertain`, never a guess |
 | `AGENT_CONTEXT_MAX_MESSAGES` | `6` | Bounded conversation context: last N messages sent per turn |
 | `AGENT_CONTEXT_MAX_CHARS` | `500` | Per-message truncation inside the context window |
@@ -276,12 +277,13 @@ duplicate detection by SHA-256 of normalized content)
 
 | Column | Meaning |
 | --- | --- |
-| `embedding` | `vector(2048)` — `NULL` = not indexed yet → simply not searchable |
+| `embedding` | `vector(4096)` — `NULL` = not indexed yet → simply not searchable |
 | `embedding_model` | Which model produced it — retrieval filters on the configured model, so old-model vectors are never treated as current |
 | `embedding_fingerprint` | Content-derived identity: `sha256(doc.content_hash : chunk_index : sha256(chunk.content))` — never row ids; changed → re-embed on next run |
 | `embedded_at` | When the vector was written (explicit run only) |
 
-Indexed by HNSW on `vector_cosine_ops` (cosine). `documents.knowledge_status`
+Indexed by exact sequential cosine scan (no HNSW: pgvector's HNSW caps at
+2000 dimensions, below the current model's 4096). `documents.knowledge_status`
 classifies every document — `approved` (normal retrieval), `challenge_fixture`
 (labeled conflicting-evidence material, reachable only through the service-level
 `include_challenge_fixtures` flag — the HTTP schema forbids it), `archived`

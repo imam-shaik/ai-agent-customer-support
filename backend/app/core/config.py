@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     llm_evidence_max_chars: int = 1200
 
     # --- Agent decision layer (Phase 8B) ---
+    # Candidate pool the agent retrieves per turn. Wider than the public
+    # retrieval API default (5) on purpose: nemotron-3-embed-1b's cosine
+    # band is nearly flat across chunks, so ranking alone often misses the
+    # on-topic chunk in a grown corpus — the pool widens what the gates
+    # can see, while the gates (not retrieval) still decide sufficiency.
+    agent_retrieval_top_k: int = 12
     # Signal A (relevance gate): the best retrieved candidate's cosine
     # similarity must reach this bar before evidence counts as relevant.
     # Permissive by design for LIVE embeddings: nemotron-3-embed-1b scores
@@ -87,6 +93,9 @@ class Settings(BaseSettings):
     # that must appear in the retrieved evidence. 0.75 is conservative:
     # it fails "cancel + refund" questions whose refund half is uncovered
     # BEFORE any answer is generated (false-uncertain over false-answer).
+    # Phrasing gaps found in live evaluation ("teammates" vs "members",
+    # "how retries work") were closed in the corpus, not by loosening this
+    # gate — a half-covered question must still never be answered.
     agent_min_coverage_ratio: float = 0.75
     # Bounded conversation context (§14): the last N messages, each
     # truncated, are the ONLY history that ever reaches a prompt.
@@ -98,24 +107,36 @@ class Settings(BaseSettings):
     # "fake" = deterministic test provider REJECTED unless ENVIRONMENT=testing
     # (fake embeddings must never serve real traffic).
     # Model note: the original choice (nvidia/nv-embedqa-e5-v5) reached
-    # end-of-life on NVIDIA's API (HTTP 410, verified 2026-11-10); the
-    # replacement serves the same purpose at 2048 dimensions.
+    # end-of-life on NVIDIA's API (HTTP 410, verified 2026-11-10). Its
+    # replacement (nvidia/nemotron-3-embed-1b, symmetric) produced a nearly
+    # flat cosine band — on-topic and unrelated passage pairs scored within
+    # ~0.04, so ranking could not surface the on-topic chunk in a grown
+    # corpus (probed live 2026-11-10, scripts/probe_embedding_models.py).
+    # The current model is asymmetric (needs input_type per call) and
+    # discriminates with ~0.30 margin on the same probe.
     embedding_provider: str = "nvidia"
-    embedding_model: str = "nvidia/nemotron-3-embed-1b"
+    embedding_model: str = "nvidia/nemotron-3.5-embed-8b"
     embedding_base_url: str = "https://integrate.api.nvidia.com/v1"
     embedding_api_key: str | None = None  # never committed, never logged
     # Role prefixes for models that need them (E5 family). The default
-    # model (nvidia/nemotron-3-embed-1b) is SYMMETRIC and needs NONE —
-    # both stay empty. Configurable so a future E5-style model can set
-    # them. Omitting/adding them wrongly degrades retrieval accuracy.
+    # model (nvidia/nemotron-3.5-embed-8b) does NOT use text prefixes —
+    # it takes a structured `input_type` request parameter instead, wired
+    # per role below. Omitting/adding them wrongly degrades accuracy.
     embedding_query_prefix: str = ""
     embedding_passage_prefix: str = ""
-    # Must equal the pgvector column dimension (schema: vector(2048)) AND the
+    # `input_type` for asymmetric models: "query" for retrieval questions
+    # (embed_text), "passage" for indexed chunks (embed_batch). Leave unset
+    # (None) for symmetric models — the parameter is then never sent.
+    embedding_query_input_type: str | None = None
+    embedding_passage_input_type: str | None = None
+    # Must equal the pgvector column dimension (schema: vector(4096)) AND the
     # real model's output dimension — validated at indexing/retrieval time.
-    embedding_dimensions: int = 2048
+    embedding_dimensions: int = 4096
     embedding_timeout_seconds: float = 30.0
-    # Chunks per embedding request — conservative for hosted rate limits.
-    embedding_batch_size: int = 16
+    # Chunks per embedding request. The live endpoint 500s on multi-item
+    # batches for the asymmetric 3.5 models (probed 2026-11-10), so real
+    # traffic runs one item per request; keep >= 1.
+    embedding_batch_size: int = 1
 
     # --- Retrieval (Phase 7) ---
     # Retrieval returns possible evidence only; it never decides sufficiency.
@@ -189,6 +210,19 @@ class Settings(BaseSettings):
             raise ValueError("embedding_dimensions must be >= 1")
         return value
 
+    @field_validator("embedding_query_input_type", "embedding_passage_input_type", mode="after")
+    @classmethod
+    def _validate_input_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized not in {"query", "passage"}:
+            raise ValueError(
+                "embedding input types must be None, 'query', or 'passage' "
+                f"(got {value!r})"
+            )
+        return normalized
+
     @field_validator("embedding_batch_size", mode="after")
     @classmethod
     def _validate_batch_size(cls, value: int) -> int:
@@ -250,6 +284,16 @@ class Settings(BaseSettings):
     def _validate_evidence_chars(cls, value: int) -> int:
         if value < 200:
             raise ValueError("llm_evidence_max_chars must be >= 200")
+        return value
+
+    @field_validator("agent_retrieval_top_k", mode="after")
+    @classmethod
+    def _validate_agent_top_k(cls, value: int, info) -> int:
+        max_k = info.data.get("retrieval_top_k_max", 20)
+        if value < 1 or value > max_k:
+            raise ValueError(
+                "agent_retrieval_top_k must be within [1, retrieval_top_k_max]"
+            )
         return value
 
     @field_validator("agent_min_evidence_relevance", mode="after")

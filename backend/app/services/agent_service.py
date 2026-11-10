@@ -160,6 +160,42 @@ _INJECTION_PATTERNS = (
     ),
 )
 
+# --- Layer 0b: deterministic small-talk screen (8b-4) -----------------------
+# Greetings and pleasantries are conversation, not support questions, and
+# the application answers them with its typed GREETING_TEXT. The live
+# assessment model classifies them too (prompt rule 6), but a bare
+# greeting misread by the model reaches retrieval and dead-ends in a
+# confusing "couldn't confirm an answer" (observed live 2026-11-10:
+# "hi hello" → weak_relevance). A classification this cheap and this
+# visible must not depend on model behavior. Deliberately conservative:
+# SHORT messages starting with an explicit greeting token, or standing
+# meta questions — a real support question that merely STARTS with "hi"
+# still flows through the model pipeline.
+
+_GREETING_PATTERN = re.compile(
+    # FULL match: a sequence of greeting tokens and punctuation, nothing
+    # else. "hi hello" matches; "hi I am locked out" does not — a real
+    # question that merely STARTS with "hi" flows to the model pipeline.
+    r"^\s*(?:(?:hi|hello|hey|yo|thanks|thank\s+you|thankyou|bye|goodbye|"
+    r"good\s+(?:morning|afternoon|evening))\b[\s!.?,:-]*)+$",
+    re.IGNORECASE,
+)
+_GREETING_META_PATTERN = re.compile(
+    r"^\s*(?:how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+_SMALL_TALK_MAX_CHARS = 40
+
+
+def _is_small_talk(question: str) -> bool:
+    trimmed = (question or "").strip()
+    if not trimmed or len(trimmed) > _SMALL_TALK_MAX_CHARS:
+        return False
+    return bool(
+        _GREETING_PATTERN.fullmatch(trimmed) or _GREETING_META_PATTERN.fullmatch(trimmed)
+    )
+
+
 # Clarification content rules (§4) — defensive patterns on top of the
 # structural boundary; violation is malformed model output (502), never
 # repaired and never shown.
@@ -218,6 +254,19 @@ def run_agent_turn(
             text=GUARD_TEXT,
             options=tuple(UNSUPPORTED_SUGGESTIONS),
             category="input_safety",
+        )
+
+    # --- 0b. SMALL TALK: deterministic short-circuit, 0 LLM calls (8b-4) ---
+    if _is_small_talk(question):
+        logger.info(
+            "agent_decision kind=%s category=small_talk llm_calls=0",
+            DECISION_GREETING,
+        )
+        return AgentDecision(
+            kind=DECISION_GREETING,
+            text=GREETING_TEXT,
+            options=tuple(UNSUPPORTED_SUGGESTIONS),
+            category="small_talk",
         )
 
     # --- provider resolved at the first LLM boundary (explicit failures) ---
@@ -311,7 +360,9 @@ def run_agent_turn(
         coverage_query = corrected[: settings.retrieval_max_query_chars]
 
     try:
-        retrieval = RetrievalService(db).retrieve(query=working_query)
+        retrieval = RetrievalService(db).retrieve(
+            query=working_query, limit=settings.agent_retrieval_top_k
+        )
     except EmbeddingProviderError as exc:
         logger.error("agent_retrieval_failed error_type=EmbeddingProviderError")
         raise EmbeddingUnavailableError(str(exc)) from None
@@ -367,12 +418,21 @@ def run_agent_turn(
     # --- 5. SIGNAL B: coverage gate (deterministic, config bar) ---
     # Judged against the spelling-corrected query (8b-2): typos in the
     # customer's words would otherwise never match the correctly spelled
-    # evidence, no matter how relevant the retrieval was. Uses the
-    # corrected query so a clarification follow-up is judged against both
-    # pieces (§4); falls back to the working query when absent.
+    # evidence, no matter how relevant the retrieval was. The live
+    # assessment model may also REWRITE the question (fold context, drop
+    # filler), which can inject vocabulary the corpus legitimately lacks —
+    # so the customer's own words are the fallback view: the gate passes
+    # when EITHER view is covered, and only a genuine gap in BOTH means
+    # the evidence is really insufficient (§4 clarification follow-ups are
+    # judged against both pieces). Falls back to the working query when
+    # the correction is absent (stub assessments, older prompts).
     covered, coverage_ratio = coverage_gate(
         coverage_query, evidence, settings.agent_min_coverage_ratio
     )
+    if not covered and coverage_query != working_query:
+        covered, coverage_ratio = coverage_gate(
+            working_query, evidence, settings.agent_min_coverage_ratio
+        )
     if not covered:
         decision = _dead_end(
             DECISION_UNCERTAIN,

@@ -27,6 +27,24 @@ from app.embeddings.base import (
 _TOKEN_RE = re.compile(r"[a-z0-9']+")
 
 
+def _normalize(token: str) -> str:
+    """Crude suffix strip so inflected forms share a bucket.
+
+    "billed"/"billing"/"bill" then land on one feature, so similarity is
+    driven by SHARED VOCABULARY rather than accidental hash collisions —
+    which keeps rankings stable at any configured width (the bucket count
+    follows the schema dimension and must not change test outcomes).
+    Deliberately conservative: plurals are NOT stripped, so a short
+    incidental mention ("password resets") never outweighs the dedicated
+    section that matches the query's exact words.
+    """
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if len(token) > 5 and token.endswith("ed"):
+        return token[:-2]
+    return token
+
+
 class FakeEmbeddingProvider(EmbeddingProvider):
     """Hashed bag-of-words + bigrams, L2-normalized, deterministic."""
 
@@ -44,7 +62,7 @@ class FakeEmbeddingProvider(EmbeddingProvider):
         return self._dimensions
 
     def _embed_one(self, text: str) -> list[float]:
-        tokens = _TOKEN_RE.findall(text.lower())
+        tokens = [_normalize(token) for token in _TOKEN_RE.findall(text.lower())]
         features = tokens + [f"{a} {b}" for a, b in zip(tokens, tokens[1:])]
         vector = [0.0] * self._dimensions
         for feature in features:

@@ -24,7 +24,7 @@ export function GroundedAnswer({ text, citations, onInspect }: GroundedAnswerPro
 
   return (
     <div className="min-w-0">
-      <div className="max-w-[65ch] text-[16px] leading-[1.7] text-ink">
+      <div className="max-w-[65ch] whitespace-pre-line text-[16px] leading-[1.7] text-ink">
         {segments.map((segment, index) => {
           if (segment.type === "text") return <span key={index}>{segment.value}</span>;
           return (

@@ -233,7 +233,7 @@ class TestIndexRun:
 
             @property
             def dimensions(self) -> int:
-                return 2048
+                return 4096
 
             def embed_text(self, text: str) -> list[float]:
                 raise EmbeddingProviderError("simulated outage")
