@@ -149,7 +149,7 @@ export function TicketQueue({
             <Input
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="Search ID, customer, email, summary…"
+              placeholder="Search tickets…"
               aria-label="Search tickets"
               className="pl-9 pr-8"
             />

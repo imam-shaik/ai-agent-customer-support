@@ -61,6 +61,17 @@ _CANNED_CLARIFICATION = (
 )
 _CANNED_OPTIONS = ("Signing in", "Managing billing", "Using a specific feature")
 
+# Small talk (8b-4): short greeting/identity messages get the same
+# small_talk classification as the live model, so demo mode behaves
+# identically. Guarded to short messages only — a real question that
+# merely STARTS with "hi" must still be answered.
+_GREETING_PATTERN = re.compile(
+    r"^\s*(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you|bye)"
+    r"\b",
+    re.IGNORECASE,
+)
+_GREETING_MAX_CHARS = 30
+
 # Framing word the stub's own answer template introduces ("According to …");
 # allowed by the support check so template chrome never fails an answer
 # that is otherwise quoted from evidence.
@@ -100,6 +111,14 @@ class StubLLMProvider(LLMProvider):
     # --- call #1: material ambiguity (regex heuristic, deterministic) ---
 
     def _assess(self, question: str) -> str:
+        trimmed = (question or "").strip()
+        if (
+            len(trimmed) <= _GREETING_MAX_CHARS
+            and _GREETING_PATTERN.search(trimmed)
+        ):
+            return json.dumps(
+                {"ambiguous": False, "clarification": "", "options": [], "small_talk": True}
+            )
         ambiguous = any(pattern.search(question) for pattern in _VAGUE_PATTERNS)
         if not ambiguous:
             return json.dumps(

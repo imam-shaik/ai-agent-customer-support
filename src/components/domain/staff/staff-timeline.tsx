@@ -42,12 +42,20 @@ function AiReplyBody({
     return <GroundedAnswer text={reply.text} citations={citations} />;
   }
 
-  if (reply.kind === "clarifying" || reply.kind === "guard") {
+  if (
+    reply.kind === "clarifying" ||
+    reply.kind === "guard" ||
+    reply.kind === "greeting"
+  ) {
     return (
       <div>
         <p className="text-[15px] leading-relaxed text-ink-secondary">{reply.text}</p>
         <p className="mt-3 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-          {reply.kind === "guard" ? "Then offered to continue with" : "Asked the customer"}
+          {reply.kind === "guard"
+            ? "Then offered to continue with"
+            : reply.kind === "greeting"
+              ? "Greeted the customer and offered help with"
+              : "Asked the customer"}
         </p>
         <ul className="mt-1.5 flex flex-wrap gap-1.5">
           {reply.options.map((option) => (

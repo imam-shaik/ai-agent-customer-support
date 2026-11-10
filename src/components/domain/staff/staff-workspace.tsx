@@ -340,18 +340,27 @@ export function SupportStaffWorkspace() {
   }, [fetchPage, loading, loadingMore, tickets.length, total]);
 
   const handleSendReply = useCallback(
-    async (ticketId: string, message: string) => {
+    async (ticketId: string, message: string, channel: "smtp" | "gmail") => {
       if (!authed) throw new ApiError("Sign in to send replies.", { status: 401 });
-      const reply = await api.tickets.sendReply(ticketId, message);
-      toast({
-        title: reply.emailDispatched
-          ? `Reply sent to ${reply.sentTo}`
-          : "Reply stored — email not delivered",
-        description: reply.emailDispatched
-          ? `${ticketId} · by ${reply.staffName}`
-          : (reply.dispatchNote ?? "The message is recorded with the ticket."),
-        tone: reply.emailDispatched ? "success" : "info",
-      });
+      const reply = await api.tickets.sendReply(ticketId, message, channel);
+      if (channel === "gmail") {
+        toast({
+          title: "Gmail compose opened",
+          description:
+            "Press Send in the Gmail tab to deliver the reply — the message is recorded with the ticket.",
+          tone: "info",
+        });
+      } else {
+        toast({
+          title: reply.emailDispatched
+            ? `Reply sent to ${reply.sentTo}`
+            : "Reply stored — email not delivered",
+          description: reply.emailDispatched
+            ? `${ticketId} · by ${reply.staffName}`
+            : (reply.dispatchNote ?? "The message is recorded with the ticket."),
+          tone: reply.emailDispatched ? "success" : "info",
+        });
+      }
       // Refresh the stored reply history from the server (never local state).
       void fetchDetail(ticketId);
     },
@@ -494,6 +503,7 @@ export function SupportStaffWorkspace() {
                   onBack={() => setMobileView("queue")}
                   pulse={pulseId === selectedId}
                   onSendReply={handleSendReply}
+                  staffName={authState.user.name}
                 />
               </div>
             </div>

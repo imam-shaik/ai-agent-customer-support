@@ -354,6 +354,11 @@ class StaffReply(Base):
     sent_to: Mapped[str] = mapped_column(String(320), nullable=False)
     email_dispatched: Mapped[bool] = mapped_column(nullable=False, default=False)
     dispatch_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # How the reply left the app: "smtp" (server sent it), "gmail" (the
+    # staff member completes delivery in Gmail compose, opened pre-filled
+    # by the UI), or NULL (legacy rows). Delivery outside the app can
+    # never be verified here, so gmail rows stay email_dispatched=False.
+    dispatch_channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     ticket: Mapped[Ticket] = relationship(back_populates="replies")

@@ -30,10 +30,14 @@ interface TicketDetailProps {
   onBack: () => void;
   /** One soft pulse right after a status transition. */
   pulse?: boolean;
-  /** Send one reply to the ticket's customer email (stored + dispatched
-   *  server-side; the workspace refreshes the detail and toasts). Throws
-   *  ApiError so the composer can show the failure inline. */
-  onSendReply: (ticketId: string, message: string) => Promise<void>;
+  /** Send one reply (channel decides delivery): "gmail" opens Gmail
+   *  compose pre-filled (the staff member presses Send there), "smtp"
+   *  dispatches server-side. The workspace stores the reply, refreshes
+   *  the detail, and toasts the outcome. Throws ApiError so the
+   *  composer can show the failure inline. */
+  onSendReply: (ticketId: string, message: string, channel: "smtp" | "gmail") => Promise<void>;
+  /** Signed-in staff name for the reply signature. */
+  staffName: string;
 }
 
 /** Mono ticket id with click-to-copy (clipboard API; transient check). */
@@ -94,21 +98,45 @@ function DetailSkeleton() {
 }
 
 /**
- * Reply composer — write a message and send it straight to the selected
- * ticket's customer email. Every send is stored server-side with an
- * honest dispatch outcome; the sent history below renders those stored
- * records only.
+ * Reply composer — write a message and hand it to Gmail.
+ *
+ * Clicking "Send via Gmail" opens Gmail's compose window in a new tab
+ * with the recipient, subject, and message pre-filled; the staff member
+ * presses Send there to actually deliver the email. The reply is still
+ * STORED with the ticket (channel "gmail", honestly marked as a
+ * hand-off — the app cannot see Gmail's outbox), so the sent history
+ * below renders those stored records.
+ *
+ * Popup-safety: window.open runs synchronously inside the click handler
+ * (user gesture intact). If the store call then fails, the opened tab
+ * is closed again and the error is shown inline.
  */
 function ReplyComposer({
   ticket,
+  staffName,
   onSendReply,
 }: {
   ticket: StaffTicketDetail;
-  onSendReply: (ticketId: string, message: string) => Promise<void>;
+  staffName: string;
+  onSendReply: (ticketId: string, message: string, channel: "smtp" | "gmail") => Promise<void>;
 }) {
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function gmailComposeUrl(): string {
+    const subject = `[${ticket.id}] ${ticket.summary}`;
+    const bodyWithSignature =
+      body.trim() + `\n\n— ${staffName}\nNorthstar Desk Support`;
+    const params = new URLSearchParams({
+      view: "cm",
+      fs: "1",
+      to: ticket.customer.email,
+      su: subject,
+      body: bodyWithSignature,
+    });
+    return `https://mail.google.com/mail/?${params.toString()}`;
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -118,12 +146,19 @@ function ReplyComposer({
       setError("Write a message before sending.");
       return;
     }
+
+    // Open synchronously inside the gesture — a window.open after an
+    // await is treated as a popup and blocked by browsers.
+    const gmailTab = window.open(gmailComposeUrl(), "_blank", "noopener,noreferrer");
+
     setSending(true);
     setError(null);
     try {
-      await onSendReply(ticket.id, message);
+      await onSendReply(ticket.id, message, "gmail");
       setBody("");
     } catch (sendError) {
+      // The reply was NOT stored — don't leave a dangling Gmail tab.
+      if (gmailTab && !gmailTab.closed) gmailTab.close();
       setError(
         sendError instanceof Error && sendError.message
           ? sendError.message
@@ -172,10 +207,14 @@ function ReplyComposer({
         </span>
       </div>
 
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] leading-relaxed text-ink-muted">
+          Opens Gmail compose in a new tab with this message pre-filled —
+          press Send there to deliver it.
+        </p>
         <Button type="submit" size="sm" loading={sending} disabled={!body.trim()}>
           <Send aria-hidden="true" />
-          Send to {ticket.customer.name.split(" ")[0] || "customer"}
+          Send via Gmail
         </Button>
       </div>
     </form>
@@ -201,7 +240,12 @@ function SentReplies({ ticket }: { ticket: StaffTicketDetail }) {
                 {formatTicketTime(reply.createdAt)}
               </span>
               <span className="ml-auto">
-                {reply.emailDispatched ? (
+                {reply.dispatchChannel === "gmail" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-info-border bg-info-soft px-2 py-0.5 text-[10px] font-medium text-info-ink">
+                    <Send aria-hidden="true" className="size-3" />
+                    Sent via Gmail
+                  </span>
+                ) : reply.emailDispatched ? (
                   <span className="inline-flex items-center gap-1 rounded-full border border-success-border bg-success-soft px-2 py-0.5 text-[10px] font-medium text-success-ink">
                     <Check aria-hidden="true" className="size-3" />
                     Emailed to {reply.sentTo}
@@ -246,6 +290,7 @@ export function TicketDetail({
   onBack,
   pulse = false,
   onSendReply,
+  staffName,
 }: TicketDetailProps) {
   if (!ticket && loading) {
     return (
@@ -449,7 +494,7 @@ export function TicketDetail({
           </section>
 
           {/* Reply to the customer straight from this view */}
-          <ReplyComposer ticket={ticket} onSendReply={onSendReply} />
+          <ReplyComposer ticket={ticket} staffName={staffName} onSendReply={onSendReply} />
           <SentReplies ticket={ticket} />
         </div>
       </div>

@@ -203,7 +203,9 @@ export interface ApiTicketDetail extends ApiTicketSummary {
   replies: ApiStaffReply[];
 }
 
-/** One stored staff reply — what was sent, to whom, delivered or not. */
+/** One stored staff reply — what was sent, to whom, delivered or not.
+ *  `channel`: "smtp" (server sent it), "gmail" (handed off to Gmail
+ *  compose — delivery completes in Gmail, unverified here), or null. */
 export interface ApiStaffReply {
   id: string;
   staffName: string;
@@ -211,6 +213,7 @@ export interface ApiStaffReply {
   sentTo: string;
   emailDispatched: boolean;
   dispatchNote: string | null;
+  dispatchChannel: "smtp" | "gmail" | null;
   createdAt: string;
 }
 
@@ -636,13 +639,17 @@ export const api = {
       ),
 
     /** POST /api/v1/admin/escalations/{id}/replies — send one reply to
-     *  the ticket's customer email. The stored record reports the honest
-     *  dispatch outcome (emailDispatched=false + note when SMTP is not
-     *  configured server-side — never a fake "sent"). */
-    sendReply: (ticketId: string, message: string): Promise<ApiStaffReply> =>
+     *  the ticket's customer email. channel "smtp" (default) = server
+     *  dispatch; "gmail" = the UI opens Gmail compose pre-filled and the
+     *  staff member completes delivery there (recorded as a hand-off). */
+    sendReply: (
+      ticketId: string,
+      message: string,
+      channel: "smtp" | "gmail" = "smtp",
+    ): Promise<ApiStaffReply> =>
       request<ApiStaffReply>(
         `/api/v1/admin/escalations/${encodeURIComponent(ticketId)}/replies`,
-        { method: "POST", body: { message } },
+        { method: "POST", body: { message, channel } },
       ),
   },
 

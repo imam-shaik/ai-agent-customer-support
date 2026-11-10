@@ -46,6 +46,11 @@ class QuestionAssessment(BaseModel):
     # as before (stub assessments, older prompts). Internal only — it feeds
     # embedding + the deterministic coverage gate, never the customer.
     search_query: str = Field(default="", max_length=400)
+    # Small-talk classification (8b-4): greetings, pleasantries, identity
+    # and capability questions are conversation, not support questions —
+    # the application replies with a fixed greeting and never retrieves.
+    # Optional by contract: absent ⇒ false (stub, older prompts).
+    small_talk: bool = False
 
 
 class EvidenceVerdict(BaseModel):

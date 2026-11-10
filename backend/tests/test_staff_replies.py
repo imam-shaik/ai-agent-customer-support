@@ -163,6 +163,7 @@ def test_reply_with_smtp_configured_reports_dispatched(
     reply = response.json()
     assert reply["emailDispatched"] is True
     assert reply["dispatchNote"] is None
+    assert reply["dispatchChannel"] == "smtp"
     assert len(sent) == 1
     assert sent[0]["to"] == ticket["customerEmail"]
     assert ticket["id"] in sent[0]["subject"]
@@ -171,3 +172,37 @@ def test_reply_with_smtp_configured_reports_dispatched(
     detail = client.get(f"/api/v1/admin/escalations/{ticket['id']}").json()
     event = next(e for e in detail["events"] if e["eventType"] == "staff_reply")
     assert event["newValue"] == "emailed"
+
+
+def test_reply_via_gmail_channel_is_a_honest_handoff(
+    client, conversation_with_message, monkeypatch
+):
+    """channel="gmail": NO server dispatch is attempted (SMTP not touched
+    even if configured). The reply is stored as a Gmail hand-off —
+    emailDispatched stays False (this app cannot see Gmail's outbox),
+    with the gmail channel recorded for the UI badge."""
+    import app.services.email_service as email_service
+
+    def _fail_dispatch(**kwargs):
+        raise AssertionError("gmail channel must not attempt SMTP dispatch")
+
+    monkeypatch.setattr(email_service, "dispatch_email", _fail_dispatch)
+
+    ticket = _escalate(client, conversation_with_message["conversationId"])
+    response = client.post(
+        f"/api/v1/admin/escalations/{ticket['id']}/replies",
+        json={
+            "message": "Invites are under Settings → Team.",
+            "channel": "gmail",
+        },
+    )
+    assert response.status_code == 201, response.text
+    reply = response.json()
+    assert reply["dispatchChannel"] == "gmail"
+    assert reply["emailDispatched"] is False
+    assert "Gmail" in (reply["dispatchNote"] or "")
+
+    detail = client.get(f"/api/v1/admin/escalations/{ticket['id']}").json()
+    assert detail["replies"][0]["dispatchChannel"] == "gmail"
+    event = next(e for e in detail["events"] if e["eventType"] == "staff_reply")
+    assert event["newValue"] == "gmail"

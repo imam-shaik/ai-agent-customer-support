@@ -17,6 +17,8 @@ Phase 9 can consume responses without rewriting the UI:
 Phase 8B deltas (additive only — every existing member is unchanged):
 - NEW `uncertain` kind: evidence existed but could not support a
   complete answer (the five internal categories all show one typed text).
+- NEW `greeting` kind (8b-4): small talk — a fixed application reply
+  with topic suggestions; no retrieval, one assessment call.
 - `escalation_offer` field on the three dead-end kinds (unsupported,
   uncertain, conflict): an OFFER attached to the outcome that dead-ended,
   not a separate turn kind — one turn is one reply (design §10).
@@ -49,6 +51,15 @@ class GroundedReply(ApiModel):
 
 class ClarifyingReply(ApiModel):
     kind: Literal["clarifying"]
+    text: str
+    options: list[str]
+
+
+class GreetingReply(ApiModel):
+    """Small talk (8b-4): a fixed friendly application reply that steers
+    back to the supported topics. The model never writes this text."""
+
+    kind: Literal["greeting"]
     text: str
     options: list[str]
 
@@ -100,6 +111,7 @@ AgentReply = Annotated[
     Union[
         GroundedReply,
         ClarifyingReply,
+        GreetingReply,
         UnsupportedReply,
         UncertainReply,
         ConflictReply,

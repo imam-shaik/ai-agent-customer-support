@@ -13,6 +13,7 @@ import {
   api,
   ApiError,
   type ApiActiveTicket,
+  type ApiMessage,
   type ApiTicketDetail,
   type ApiTicketStatus,
 } from "@/lib/api/client";
@@ -29,9 +30,19 @@ export interface TicketRecord {
   summary: string;
   contact: ContactInfo;
   originalQuestion: string;
+  /** Customer-facing count: a question and its answer are ONE message. */
   contextMessages: number;
   createdAt: string;
   status: ApiTicketStatus;
+}
+
+/**
+ * Customer-facing message count: a question and its answer are ONE
+ * message. The server stores each side as its own row, but customers
+ * think in exchanges — so every customer question counts once.
+ */
+export function countCustomerTurns(messages: ApiMessage[]): number {
+  return messages.filter((message) => message.role === "user").length;
 }
 
 const PURPOSE =
@@ -95,19 +106,22 @@ export function ticketRecordFromDetail(detail: ApiTicketDetail): TicketRecord {
     summary: detail.summary,
     contact: { name: detail.customerName, email: detail.customerEmail, phone: detail.customerPhone ?? "" },
     originalQuestion: detail.originalQuestion,
-    contextMessages: detail.messages.length,
+    contextMessages: countCustomerTurns(detail.messages),
     createdAt: formatTicketTime(detail.createdAt),
     status: detail.status,
   };
 }
 
-export function ticketRecordFromActive(active: ApiActiveTicket): TicketRecord {
+export function ticketRecordFromActive(
+  active: ApiActiveTicket,
+  contextMessages: number,
+): TicketRecord {
   return {
     id: active.id,
     summary: active.summary,
     contact: { name: active.customerName, email: active.customerEmail, phone: active.customerPhone ?? "" },
     originalQuestion: active.originalQuestion,
-    contextMessages: active.messageCount,
+    contextMessages,
     createdAt: formatTicketTime(active.createdAt),
     status: active.status,
   };
@@ -131,7 +145,8 @@ interface EscalationDialogProps {
   conversationId: string | null;
   /** The message that triggered escalation. */
   originalQuestion: string;
-  /** Number of messages that will be attached as context. */
+  /** Attached context shown to the customer: one question + its answer
+   *  is ONE message (see `countCustomerTurns`). */
   contextMessages: number;
   /** Deterministic reason derived from the reply kind (never model text). */
   escalationReason?: string;

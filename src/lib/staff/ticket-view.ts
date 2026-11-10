@@ -70,6 +70,7 @@ export interface StaffTicketDetail extends StaffTicketSummary {
 export const AI_OUTCOME_LABEL: Record<AgentReply["kind"], string> = {
   grounded: "Grounded answer",
   clarifying: "Clarifying question",
+  greeting: "Small talk",
   guard: "Guidelines applied",
   conflict: "Conflicting evidence",
   unsupported: "No supporting evidence",
@@ -84,6 +85,7 @@ export const AI_OUTCOME_VARIANT: Record<
 > = {
   grounded: "success",
   clarifying: "info",
+  greeting: "info",
   guard: "info",
   conflict: "warning",
   unsupported: "warning",

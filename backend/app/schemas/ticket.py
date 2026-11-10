@@ -10,6 +10,10 @@ from app.schemas.common import ApiModel
 
 TicketStatus = Literal["OPEN", "IN_PROGRESS", "RESOLVED"]
 TicketPriority = Literal["normal", "high"]
+# How a reply leaves the app: "smtp" = the server sends it (requires
+# SMTP_HOST); "gmail" = the UI opens Gmail compose pre-filled and the
+# staff member completes delivery there (no SMTP config needed).
+ReplyChannel = Literal["smtp", "gmail"]
 
 
 class EscalationCreate(ApiModel):
@@ -43,6 +47,9 @@ class StaffReplyCreate(ApiModel):
     """Body of one staff reply, sent to the ticket's customer email."""
 
     message: str = Field(min_length=1, max_length=4000)
+    # "smtp" (default): server-side dispatch. "gmail": the UI opens Gmail
+    # compose pre-filled; delivery completes in Gmail, outside this app.
+    channel: ReplyChannel = "smtp"
 
 
 class StaffReplyOut(ApiModel):
@@ -54,6 +61,7 @@ class StaffReplyOut(ApiModel):
     sent_to: str
     email_dispatched: bool
     dispatch_note: str | None = None
+    dispatch_channel: Literal["smtp", "gmail"] | None = None
     created_at: datetime
 
 

@@ -81,6 +81,7 @@ export const REPLY_BADGE: Record<
         : "",
   },
   clarifying: { variant: "info", label: () => "Clarifying question" },
+  greeting: { variant: "info", label: () => "Assistant greeting" },
   guard: { variant: "info", label: () => "Guidelines applied" },
   conflict: { variant: "warning", label: () => "Conflicting evidence" },
   unsupported: { variant: "warning", label: () => "No supporting evidence" },
@@ -259,6 +260,9 @@ export function MessageTimeline({
                   />
                 )}
                 {reply.kind === "clarifying" && (
+                  <ClarifyingCard text={reply.text} options={reply.options} onPick={onPick} />
+                )}
+                {reply.kind === "greeting" && (
                   <ClarifyingCard text={reply.text} options={reply.options} onPick={onPick} />
                 )}
                 {reply.kind === "guard" && (

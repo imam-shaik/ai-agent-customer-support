@@ -202,7 +202,7 @@ export function SourcesRail({
           </div>
         )}
 
-        {!thinking && turn && reply && reply.kind !== "grounded" && reply.kind !== "clarifying" && reply.kind !== "guard" && (
+        {!thinking && turn && reply && reply.kind !== "grounded" && reply.kind !== "clarifying" && reply.kind !== "greeting" && reply.kind !== "guard" && (
           <CheckedDocumentsBlock reply={reply} documentTitles={documentTitles} />
         )}
 
@@ -211,6 +211,14 @@ export function SourcesRail({
             icon={<Info aria-hidden="true" className="size-4 text-info-ink" />}
             title="No documents searched yet"
             body="This turn asked you a clarifying question first. Once you answer, the documentation search runs and its sources appear here."
+          />
+        )}
+
+        {!thinking && turn && reply && reply.kind === "greeting" && (
+          <HonestEmpty
+            icon={<Info aria-hidden="true" className="size-4 text-info-ink" />}
+            title="No documents searched"
+            body="This was a friendly greeting — no documentation search was needed. Ask a support question and the sources appear here."
           />
         )}
 

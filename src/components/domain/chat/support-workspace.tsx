@@ -16,6 +16,7 @@ import { Drawer } from "@/components/ui/drawer";
 import {
   EscalationDialog,
   TicketChip,
+  countCustomerTurns,
   ticketRecordFromActive,
   ticketRecordFromDetail,
   type ContactInfo,
@@ -206,6 +207,8 @@ const ANNOUNCEMENTS: Record<AgentReply["kind"], (reply: AgentReply) => string> =
       ? `Grounded answer received, supported by ${reply.citations.length} source${reply.citations.length === 1 ? "" : "s"}.`
       : "",
   clarifying: () => "A clarifying question was received.",
+  greeting: () =>
+    "The assistant greeted you and offered to help with the supported topics.",
   guard: () =>
     "The request to override instructions was declined; no internal details were revealed and the support workflow continued.",
   conflict: () =>
@@ -297,7 +300,12 @@ export function SupportWorkspace() {
         setConversationId(stored);
         setMessages(toChatMessages(history));
         if (history.activeTicket) {
-          setTicket(ticketRecordFromActive(history.activeTicket));
+          setTicket(
+            ticketRecordFromActive(
+              history.activeTicket,
+              countCustomerTurns(history.messages)
+            )
+          );
         }
       })
       .catch(() => {
@@ -326,6 +334,13 @@ export function SupportWorkspace() {
 
   const busy = thinking || hydrating;
   const hasConversation = messages.length > 0;
+
+  /** Customer-facing count: one question + its answer is ONE message,
+   *  so the counter follows exchanges, not stored rows. */
+  const messageCount = useMemo(
+    () => messages.filter((message) => message.kind === "user").length,
+    [messages]
+  );
 
   const lastUserQuestion = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -681,7 +696,7 @@ export function SupportWorkspace() {
                   {hydrating
                     ? "Restoring…"
                     : hasConversation
-                      ? `${messages.length} message${messages.length === 1 ? "" : "s"}`
+                      ? `${messageCount} message${messageCount === 1 ? "" : "s"}`
                       : "Ready"}
                 </span>
               </div>
@@ -789,7 +804,7 @@ export function SupportWorkspace() {
         onOpenChange={setEscalationOpen}
         conversationId={conversationId}
         originalQuestion={lastUserQuestion}
-        contextMessages={messages.length}
+        contextMessages={messageCount}
         escalationReason={escalationReasonFor(latestReply)}
         contact={contact}
         onContactChange={setContact}

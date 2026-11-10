@@ -287,6 +287,12 @@ class ChatService:
                 "text": decision.text,
                 "options": list(decision.options),
             }
+        elif decision.kind == agent_service.DECISION_GREETING:
+            reply_dict = {
+                "kind": "greeting",
+                "text": decision.text,
+                "options": list(decision.options),
+            }
         elif decision.kind == agent_service.DECISION_GUARD:
             reply_dict = {
                 "kind": "guard",

@@ -189,6 +189,7 @@ class TicketService:
                 sent_to=reply.sent_to,
                 email_dispatched=reply.email_dispatched,
                 dispatch_note=reply.dispatch_note,
+                dispatch_channel=reply.dispatch_channel,
                 created_at=reply.created_at,
             )
             for reply in ticket.replies
@@ -261,34 +262,55 @@ class TicketService:
     ) -> StaffReplyOut:
         """Send one staff reply to the ticket's customer email.
 
-        The email dispatch is attempted first (an honest boundary —
-        missing/failing SMTP is a documented not-delivered state, never a
-        fake success), then the reply is STORED with its dispatch outcome
-        together with a `staff_reply` audit event in ONE commit, so the
-        correspondence record and the audit trail can never diverge.
+        Two dispatch channels:
+        - "smtp": the server attempts delivery via the EmailService
+          boundary — an honest result (missing/failing SMTP is a
+          documented not-delivered state, never a fake success).
+        - "gmail": NO server dispatch. The UI opens Gmail compose
+          pre-filled (recipient, subject, body) and the staff member
+          completes delivery there; the reply is stored with
+          dispatch_channel="gmail" and email_dispatched=False — this app
+          cannot see Gmail's outbox, so it never claims delivery.
+
+        Either way the reply + a `staff_reply` audit event commit in ONE
+        transaction, so correspondence and audit trail never diverge.
         """
         ticket = self.repo.get_ticket_with_context(ticket_id)
         if ticket is None:
             raise NotFoundError("Ticket not found.")
 
-        dispatch = dispatch_email(
-            to=ticket.customer_email,
-            subject=f"[{ticket.id}] {ticket.summary}",
-            body=payload.message,
-        )
+        if payload.channel == "gmail":
+            dispatched = False
+            note = (
+                "Opened in Gmail compose — the reply is delivered from "
+                "Gmail by staff; this app does not verify Gmail delivery."
+            )
+            channel: str | None = "gmail"
+            event_value = "gmail"
+        else:
+            dispatch = dispatch_email(
+                to=ticket.customer_email,
+                subject=f"[{ticket.id}] {ticket.summary}",
+                body=payload.message,
+            )
+            dispatched = dispatch.dispatched
+            note = dispatch.note
+            channel = "smtp"
+            event_value = "emailed" if dispatched else "stored"
 
         reply = StaffReply(
             ticket_id=ticket.id,
             staff_name=actor.strip() or "staff",
             body=payload.message,
             sent_to=ticket.customer_email,
-            email_dispatched=dispatch.dispatched,
-            dispatch_note=dispatch.note,
+            email_dispatched=dispatched,
+            dispatch_note=note,
+            dispatch_channel=channel,
         )
         self.repo.add_ticket_event_pending(
             ticket.id,
             "staff_reply",
-            new_value="emailed" if dispatch.dispatched else "stored",
+            new_value=event_value,
             actor=reply.staff_name,
         )
         self.repo.db.add(reply)
@@ -296,9 +318,10 @@ class TicketService:
         # reply recorded without its audit trail (or the reverse).
         self.repo.db.commit()
         logger.info(
-            "staff_reply_recorded ticket_id=%s dispatched=%s actor=%s",
+            "staff_reply_recorded ticket_id=%s channel=%s dispatched=%s actor=%s",
             ticket.id,
-            dispatch.dispatched,
+            channel,
+            dispatched,
             reply.staff_name,
         )
         return StaffReplyOut(
@@ -308,5 +331,6 @@ class TicketService:
             sent_to=reply.sent_to,
             email_dispatched=reply.email_dispatched,
             dispatch_note=reply.dispatch_note,
+            dispatch_channel=reply.dispatch_channel,
             created_at=reply.created_at,
         )

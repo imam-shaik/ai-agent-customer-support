@@ -36,6 +36,7 @@ from app.llm.prompting import (
     CONFLICT_TEXT,
     ESCALATION_OFFER_TEXT,
     FALLBACK_UNSUPPORTED_TEXT,
+    GREETING_TEXT,
     UNCERTAIN_TEXT,
 )
 from app.services.agent_service import (
@@ -43,6 +44,7 @@ from app.services.agent_service import (
     CATEGORY_MODEL_DECLINED,
     DECISION_CLARIFICATION,
     DECISION_CONFLICTING,
+    DECISION_GREETING,
     DECISION_GROUNDED,
     DECISION_UNCERTAIN,
     DECISION_UNSUPPORTED,
@@ -942,6 +944,71 @@ class TestDeterminism:
         assert [item.ref for item in first.cited] == [
             item.ref for item in second.cited
         ]
+
+# ---------------------------------------------------------------------------
+# 8b-4: small talk — typed greeting, one LLM call, no retrieval
+# ---------------------------------------------------------------------------
+
+
+class TestGreeting:
+    """Greetings and pleasantries are conversation, not support questions:
+    the application replies with the fixed GREETING_TEXT plus topic
+    suggestions. The model never writes the reply, nothing is retrieved,
+    and no escalation is attached (it is not a dead end)."""
+
+    def test_small_talk_returns_typed_greeting(self, monkeypatch: pytest.MonkeyPatch):
+        _patch_retrieval(monkeypatch, (_candidate(1),))  # would poison a retrieval
+        provider = ScriptedProvider(
+            {
+                TASK_ASSESSMENT: json.dumps(
+                    {
+                        "ambiguous": False,
+                        "clarification": "",
+                        "options": [],
+                        "small_talk": True,
+                    }
+                )
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        decision = run_agent_turn(None, question="how are you?")
+
+        assert decision.kind == DECISION_GREETING
+        assert decision.text == GREETING_TEXT
+        assert decision.category == "small_talk"
+        assert decision.escalation_offer is None
+        assert decision.options == (
+            "How do I reset my password?",
+            "When am I billed?",
+            "How do I invite my team?",
+        )
+        # Exactly one LLM call (assessment) — no retrieval, no generation.
+        assert _tasks(provider) == [TASK_ASSESSMENT]
+
+    def test_small_talk_with_payload_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
+        """A small-talk flag plus any decision payload is malformed model
+        output — 502, never repaired, never shown."""
+        from app.core.exceptions import GenerationFailedError
+
+        _patch_retrieval(monkeypatch, (_candidate(1),))
+        provider = ScriptedProvider(
+            {
+                TASK_ASSESSMENT: json.dumps(
+                    {
+                        "ambiguous": True,
+                        "clarification": "Is this about signing in or billing?",
+                        "options": ["Signing in", "Billing"],
+                        "small_talk": True,
+                    }
+                )
+            }
+        )
+        _patch_provider(monkeypatch, provider)
+
+        with pytest.raises(GenerationFailedError):
+            run_agent_turn(None, question=QUESTION)
+
 
 # ---------------------------------------------------------------------------
 # 8b-2: spelling-corrected search_query from call #1 feeds the coverage gate

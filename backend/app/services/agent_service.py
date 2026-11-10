@@ -58,6 +58,7 @@ from app.llm.base import (
 from app.llm.prompting import (
     ESCALATION_OFFER_TEXT,
     FALLBACK_UNSUPPORTED_TEXT,
+    GREETING_TEXT,
     GUARD_TEXT,
     UNSUPPORTED_SUGGESTIONS,  # re-exported for the chat reply contract
     UNCERTAIN_TEXT,
@@ -93,6 +94,7 @@ DECISION_UNSUPPORTED = "unsupported"
 DECISION_UNCERTAIN = "uncertain"
 DECISION_CONFLICTING = "conflicting"
 DECISION_GUARD = "guard"
+DECISION_GREETING = "greeting"
 
 # Uncertain sub-categories decided AFTER generation (observability only —
 # every one of them shows the same typed UNCERTAIN_TEXT to the customer).
@@ -275,6 +277,24 @@ def run_agent_turn(
             options=tuple(assessment.options),
             category="ambiguous",
         )
+
+    # --- 1b. SMALL TALK (typed reply, 1 LLM call, no retrieval) ---------
+    # Greetings and pleasantries are conversation, not support questions:
+    # a fixed friendly reply steers back to the supported topics. The
+    # model never writes this reply (§6 typed-text rule).
+    if assessment.small_talk:
+        decision = AgentDecision(
+            kind=DECISION_GREETING,
+            text=GREETING_TEXT,
+            options=tuple(UNSUPPORTED_SUGGESTIONS),
+            category="small_talk",
+        )
+        logger.info(
+            "agent_decision kind=%s category=small_talk llm_calls=%d",
+            DECISION_GREETING,
+            calls["n"],
+        )
+        return decision
 
     # --- 2. RETRIEVAL (approved scope, SQL-enforced) ---
     # Retrieval keeps the RAW question: the embedding model is typo-robust
@@ -576,6 +596,21 @@ def _parse_question_assessment(raw: str) -> QuestionAssessment:
             "agent_structured_validation task=assessment outcome=failed reason=schema"
         )
         raise GenerationFailedError(_ASSESSMENT_MESSAGE) from None
+
+    if assessment.small_talk:
+        # Small talk is mutually exclusive with everything else: the
+        # application owns the greeting reply entirely (typed text, no
+        # clarification, no options, no search).
+        if assessment.ambiguous or assessment.clarification or assessment.options:
+            logger.warning(
+                "agent_structured_validation task=assessment outcome=failed "
+                "reason=small_talk_payload"
+            )
+            raise GenerationFailedError(_ASSESSMENT_MESSAGE) from None
+        logger.info(
+            "agent_structured_validation task=assessment outcome=passed small_talk=true"
+        )
+        return assessment
 
     if not assessment.ambiguous:
         # No pretending ambiguity with a payload attached.
