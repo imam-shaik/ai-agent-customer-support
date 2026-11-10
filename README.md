@@ -165,21 +165,125 @@ model.
 ## 4. Repository layout
 
 ```text
-backend/    FastAPI + SQLAlchemy + Alembic + pgvector (see backend/README.md)
-            .env            ← YOUR API KEYS GO HERE (never committed)
-            app/api         HTTP contracts (chat, tickets, feedback, documents, retrieval)
-            app/services    business rules + agent decision pipeline
-            app/llm         LLM provider boundary (nvidia | deterministic stub)
-            app/embeddings  embedding provider boundary (nvidia | fake)
-            knowledge/      the real knowledge corpus (approved/ + challenge/)
-            scripts/        dev_db.py, index_knowledge.py, smoke.py
-src/        Next.js 15 frontend (customer chat + staff workspace)
-            src/lib/api/    the only fetch boundary to the backend
-            src/lib/staff/  staff presentation mapping (API → view)
-run.bat     one-file launcher (start / live / stop)
-archive/    docs/           all designs, phase docs, audits, final MVP report
-            unused-frontend/  retired /design page + helpers
+ai-agent-customer-support/
+│
+├── 📄 README.md                    ← you are here (project overview + docs)
+├── 📄 package.json                 ← Next.js 15 frontend manifest
+├── 📄 package-lock.json
+├── 📄 tsconfig.json
+├── 📄 next.config.ts
+├── 📄 next-env.d.ts
+├── 📄 postcss.config.mjs
+├── 📄 .env.example                 ← frontend env template (NEXT_PUBLIC_API_BASE_URL only)
+├── 📄 .gitignore                   ← ignores .env*, node_modules/, .next/, backend/data/
+├── 📄 run.bat                      ← one-file launcher (start / stop)
+│
+├── 📂 scripts/
+│   └── ⚙️ prewarm.mjs              ← frontend prewarm helper
+│
+├── 📂 src/                         ── Next.js 15 frontend (App Router)
+│   ├── 📂 app/
+│   │   ├── 📄 layout.tsx           ← root layout, theme + providers
+│   │   ├── 📄 page.tsx             ← customer chat  (localhost:3000)
+│   │   ├── 📄 globals.css
+│   │   ├── 📂 knowledge/  📄 page.tsx        ← knowledge base (/knowledge)
+│   │   └── 📂 staff/      📄 page.tsx        ← staff workspace (/staff)
+│   │
+│   ├── 📂 components/
+│   │   ├── 📂 brand/               📄 Logo.tsx · 📄 NorthstarLogo.tsx
+│   │   ├── 📂 domain/
+│   │   │   ├── 📂 chat/            ── customer conversation UI
+│   │   │   │   ├── 📄 support-workspace.tsx
+│   │   │   │   ├── 📄 message-timeline.tsx
+│   │   │   │   ├── 📄 composer.tsx
+│   │   │   │   ├── 📄 grounded-answer.tsx
+│   │   │   │   ├── 📄 response-cards.tsx
+│   │   │   │   ├── 📄 source-card.tsx · 📄 sources-rail.tsx
+│   │   │   │   ├── 📄 evidence-sheet.tsx
+│   │   │   │   ├── 📄 escalation-dialog.tsx
+│   │   │   │   ├── 📄 feedback-control.tsx
+│   │   │   │   ├── 📄 thinking-indicator.tsx
+│   │   │   │   └── 📄 welcome-state.tsx
+│   │   │   ├── 📂 knowledge/      📄 knowledge-library.tsx
+│   │   │   ├── 📂 settings/       📄 provider-controls.tsx · 📄 provider-settings-dialog.tsx
+│   │   │   └── 📂 staff/          📄 staff-workspace.tsx · 📄 staff-timeline.tsx
+│   │   │                          📄 ticket-queue.tsx · 📄 ticket-detail.tsx
+│   │   ├── 📂 layout/             📄 app-shell · top-navigation · sidebar · breadcrumbs
+│   │   │                          📄 mode-banner · page-container · page-header
+│   │   │                          📄 mobile-navigation · theme-toggle
+│   │   ├── 📂 motion/             📄 Stagger.tsx
+│   │   └── 📂 ui/                 📄 button · badge · card · input · textarea · select
+│   │                              📄 modal · drawer · dropdown-menu · tooltip · toast
+│   │                              📄 avatar · skeleton · empty-state · error-state
+│   │                              📄 field · kbd · icon-button · status-badge
+│   │
+│   ├── 📂 lib/
+│   │   ├── 📂 api/                📄 client.ts ← the ONLY fetch boundary to the backend
+│   │   │                          📄 chat-turn.ts
+│   │   ├── 📂 staff/              📄 ticket-view.ts      ← API → staff view mapping
+│   │   ├── 📂 support/            📄 knowledge.ts · markers.ts · thinking.ts · tickets.ts
+│   │   ├── 📄 motion.ts
+│   │   └── 📄 utils.ts            ← cn() class helper
+│   │
+│   └── 📄 ../Providers.tsx        ← client providers (query/theme/session)
+│
+└── 📂 backend/                    ── FastAPI + SQLAlchemy + Alembic + pgvector
+    ├── 📄 README.md               ← architecture, config reference, API surface
+    ├── 📄 requirements.txt
+    ├── 📄 alembic.ini · 📄 pytest.ini
+    ├── 📄 .env.example            ← COPY TO .env — YOUR API KEYS GO HERE (never committed)
+    │
+    ├── 📂 app/
+    │   ├── 📄 main.py             ← FastAPI app factory + CORS + health
+    │   ├── 📂 api/
+    │   │   ├── 📄 router.py
+    │   │   └── 📂 v1/             📄 chat · tickets · feedback · documents
+    │   │                          📄 retrieval · provider_settings
+    │   ├── 📂 services/           ── business rules + agent decision pipeline
+    │   │   ├── 📄 agent_service.py        ← frozen Phase 8B decision layer (6 outcomes)
+    │   │   ├── 📄 chat_service.py · 📄 conversation_context.py
+    │   │   ├── 📄 retrieval_service.py · 📄 document_service.py
+    │   │   ├── 📄 evidence_assessment.py · 📄 evidence_context.py
+    │   │   ├── 📄 indexing_service.py · 📄 ticket_service.py
+    │   │   └── 📄 provider_mode_service.py · 📄 provider_settings_service.py
+    │   ├── 📂 llm/                📄 nvidia.py · stub.py · base.py · prompting.py
+    │   ├── 📂 embeddings/         📄 nvidia.py · fake.py · base.py
+    │   ├── 📂 ingestion/          📄 pipeline.py · extractors.py   ← validate→chunk→store
+    │   ├── 📂 repositories/       📄 conversation · document · ticket
+    │   ├── 📂 schemas/            📄 chat · ticket · document · feedback · agent
+    │   │                          📄 retrieval · provider_settings · common
+    │   ├── 📂 models/             📄 entities.py   ← SQLAlchemy models (pgvector 2048)
+    │   ├── 📂 db/                 📄 session.py · base.py · seed.py
+    │   └── 📂 core/               📄 config.py · logging.py · exceptions.py · text.py
+    │
+    ├── 📂 alembic/
+    │   ├── 📄 env.py · script.py.mako
+    │   └── 📂 versions/          📄 e5c6 initial_schema · 42e8 embeddings_pgvector
+    │                              📄 5444 knowledge_chunks · d9e3 phone_optional
+    │                              📄 7c1a chat_idempotency · c4f8 live_models_vector_2048
+    │                              📄 3022 document_knowledge_status
+    │
+    ├── 📂 knowledge/             ── the real knowledge corpus (RAG source)
+    │   ├── 📂 approved/          📄 account-access · billing · subscriptions
+    │   │                          📄 getting-started · integrations · security
+    │   │                          📄 data-retention          (7 documents)
+    │   └── 📂 challenge/         📄 legacy-retention-notice  (conflict fixture, never retrieved)
+    │
+    ├── 📂 scripts/               ⚙️ dev_db.py · index_knowledge.py · smoke.py
+    │
+    └── 📂 tests/                 ── 373 pytest tests (no keys, no network)
+        ├── 📄 conftest.py · agent_harness.py
+        └── 📄 test_chat · test_decisions · test_agent · test_tickets
+               test_injection · test_provider_mode · test_retrieval
+               test_documents · test_ingestion · test_pipeline · test_indexing
+               test_embeddings · test_llm · test_feedback · test_idempotency
+               test_repositories · test_cors · test_provider_settings
+               test_message_ordering · test_phone_and_my_tickets
 ```
+
+> 🗂️ Not in git: `backend/.env`, `backend/data/`, `node_modules/`, and
+> `.next/` are gitignored. (`archive/` is referenced by older docs but
+> does not exist in this folder.)
 
 ---
 
