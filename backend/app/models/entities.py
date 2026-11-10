@@ -311,6 +311,9 @@ class Ticket(Base):
     events: Mapped[list["TicketEvent"]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan", order_by="TicketEvent.created_at"
     )
+    replies: Mapped[list["StaffReply"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan", order_by="StaffReply.created_at"
+    )
 
 
 class TicketEvent(Base):
@@ -327,6 +330,33 @@ class TicketEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     ticket: Mapped[Ticket] = relationship(back_populates="events")
+
+
+class StaffReply(Base):
+    """A message a staff member sent to the ticket's customer.
+
+    Every reply is stored here as the permanent record of what was sent,
+    to whom, and whether the email actually went out — the composer in
+    the staff workspace renders THIS stored history, never local state.
+    `email_dispatched=False` + `dispatch_note` is an honest documented
+    state: the SMTP provider was not configured (or refused), so the
+    reply is preserved as ticket correspondence but was NOT delivered.
+    """
+
+    __tablename__ = "staff_replies"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    ticket_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    staff_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_to: Mapped[str] = mapped_column(String(320), nullable=False)
+    email_dispatched: Mapped[bool] = mapped_column(nullable=False, default=False)
+    dispatch_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    ticket: Mapped[Ticket] = relationship(back_populates="replies")
 
 
 class Feedback(Base):

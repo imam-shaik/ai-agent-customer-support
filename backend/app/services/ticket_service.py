@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
-from app.models import Ticket
+from app.models import StaffReply, Ticket
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.schemas.chat import MessageOut
@@ -15,6 +15,8 @@ from app.schemas.ticket import (
     ConversationTicketListOut,
     ConversationTicketOut,
     EscalationCreate,
+    StaffReplyCreate,
+    StaffReplyOut,
     TicketDetailOut,
     TicketEventOut,
     TicketListOut,
@@ -22,6 +24,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
 )
 from app.services.chat_service import _message_out
+from app.services.email_service import dispatch_email
 logger = get_logger("app.tickets")
 
 _ALLOWED_STATUSES = ("OPEN", "IN_PROGRESS", "RESOLVED")
@@ -178,12 +181,26 @@ class TicketService:
             for event in ticket.events
         ]
 
+        replies = [
+            StaffReplyOut(
+                id=reply.id,
+                staff_name=reply.staff_name,
+                body=reply.body,
+                sent_to=reply.sent_to,
+                email_dispatched=reply.email_dispatched,
+                dispatch_note=reply.dispatch_note,
+                created_at=reply.created_at,
+            )
+            for reply in ticket.replies
+        ]
+
         base = _summary(ticket)
         return TicketDetailOut(
             **base.model_dump(),
             original_question=ticket.original_question,
             messages=messages,
             events=events,
+            replies=replies,
         )
 
     def update_status(self, ticket_id: str, payload: TicketStatusUpdate) -> TicketDetailOut:
@@ -238,3 +255,58 @@ class TicketService:
                 payload.actor,
             )
         return self.get_detail(ticket.id)
+
+    def add_reply(
+        self, ticket_id: str, payload: StaffReplyCreate, *, actor: str
+    ) -> StaffReplyOut:
+        """Send one staff reply to the ticket's customer email.
+
+        The email dispatch is attempted first (an honest boundary —
+        missing/failing SMTP is a documented not-delivered state, never a
+        fake success), then the reply is STORED with its dispatch outcome
+        together with a `staff_reply` audit event in ONE commit, so the
+        correspondence record and the audit trail can never diverge.
+        """
+        ticket = self.repo.get_ticket_with_context(ticket_id)
+        if ticket is None:
+            raise NotFoundError("Ticket not found.")
+
+        dispatch = dispatch_email(
+            to=ticket.customer_email,
+            subject=f"[{ticket.id}] {ticket.summary}",
+            body=payload.message,
+        )
+
+        reply = StaffReply(
+            ticket_id=ticket.id,
+            staff_name=actor.strip() or "staff",
+            body=payload.message,
+            sent_to=ticket.customer_email,
+            email_dispatched=dispatch.dispatched,
+            dispatch_note=dispatch.note,
+        )
+        self.repo.add_ticket_event_pending(
+            ticket.id,
+            "staff_reply",
+            new_value="emailed" if dispatch.dispatched else "stored",
+            actor=reply.staff_name,
+        )
+        self.repo.db.add(reply)
+        # ONE commit for the reply + event; a failure cannot leave the
+        # reply recorded without its audit trail (or the reverse).
+        self.repo.db.commit()
+        logger.info(
+            "staff_reply_recorded ticket_id=%s dispatched=%s actor=%s",
+            ticket.id,
+            dispatch.dispatched,
+            reply.staff_name,
+        )
+        return StaffReplyOut(
+            id=reply.id,
+            staff_name=reply.staff_name,
+            body=reply.body,
+            sent_to=reply.sent_to,
+            email_dispatched=reply.email_dispatched,
+            dispatch_note=reply.dispatch_note,
+            created_at=reply.created_at,
+        )

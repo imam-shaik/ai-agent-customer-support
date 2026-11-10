@@ -144,6 +144,19 @@ class Settings(BaseSettings):
     # honored.
     auth_session_ttl_days: int = 7
 
+    # --- Staff reply email dispatch (Phase 11) ---
+    # The staff composer stores every reply with the ticket regardless;
+    # the email itself only goes out when SMTP_HOST is configured (the
+    # standard submission port 587 with STARTTLS). Missing SMTP config is
+    # an HONEST documented state: the reply is recorded as
+    # email_dispatched=False with a note — never reported as "sent".
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None  # never committed, never logged
+    smtp_from: str | None = None  # defaults to smtp_username when absent
+    smtp_timeout_seconds: float = 15.0
+
     @field_validator("cors_origins", mode="after")
     @classmethod
     def _strip_origins(cls, value: str) -> str:
@@ -272,6 +285,20 @@ class Settings(BaseSettings):
     def _validate_session_ttl(cls, value: int) -> int:
         if not 1 <= value <= 90:
             raise ValueError("auth_session_ttl_days must be within [1, 90]")
+        return value
+
+    @field_validator("smtp_port", mode="after")
+    @classmethod
+    def _validate_smtp_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("smtp_port must be within [1, 65535]")
+        return value
+
+    @field_validator("smtp_timeout_seconds", mode="after")
+    @classmethod
+    def _validate_smtp_timeout(cls, value: float) -> float:
+        if not 1.0 <= value <= 120.0:
+            raise ValueError("smtp_timeout_seconds must be within [1, 120]")
         return value
 
     @property

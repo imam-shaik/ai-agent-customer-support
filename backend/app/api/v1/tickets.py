@@ -9,6 +9,8 @@ from app.models.entities import StaffUser
 from app.schemas.ticket import (
     ConversationTicketListOut,
     EscalationCreate,
+    StaffReplyCreate,
+    StaffReplyOut,
     TicketDetailOut,
     TicketListOut,
     TicketStatusUpdate,
@@ -111,3 +113,24 @@ def update_escalation_status(
     signed in.
     """
     return TicketService(db).update_status(ticket_id, payload)
+
+
+@router.post(
+    "/admin/escalations/{ticket_id}/replies",
+    response_model=StaffReplyOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def reply_to_customer(
+    ticket_id: str,
+    payload: StaffReplyCreate,
+    db: Session = Depends(get_db),
+    current_staff: StaffUser = Depends(get_current_staff),
+) -> StaffReplyOut:
+    """Send one reply to the ticket's customer email from the composer.
+
+    The reply is stored with the ticket together with an honest dispatch
+    outcome (`emailDispatched` + note): without SMTP configured the
+    reply is recorded as correspondence but explicitly NOT delivered.
+    404 — unknown ticket; 401 — not signed in.
+    """
+    return TicketService(db).add_reply(ticket_id, payload, actor=current_staff.name)

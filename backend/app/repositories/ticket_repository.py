@@ -35,6 +35,7 @@ class TicketRepository:
             select(Ticket)
             .options(
                 selectinload(Ticket.events),
+                selectinload(Ticket.replies),
                 selectinload(Ticket.conversation)
                 .selectinload(Conversation.messages)
                 .selectinload(Message.citations),

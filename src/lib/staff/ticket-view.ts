@@ -10,6 +10,7 @@
 import type {
   AgentReply,
   ApiCitation,
+  ApiStaffReply,
   ApiTicketDetail,
   ApiTicketEvent,
   ApiTicketPriority,
@@ -61,6 +62,9 @@ export interface StaffTicketDetail extends StaffTicketSummary {
   eventCount: number;
   /** Last assistant outcome stored before the ticket was created. */
   aiOutcome: AgentReply["kind"] | null;
+  /** Staff replies sent from the composer, oldest first (stored server
+   *  records with their honest dispatch outcome — never local state). */
+  replies: ApiStaffReply[];
 }
 
 export const AI_OUTCOME_LABEL: Record<AgentReply["kind"], string> = {
@@ -273,5 +277,6 @@ export function toStaffDetail(ticket: ApiTicketDetail): StaffTicketDetail {
     messageCount: ticket.messages.length,
     eventCount: ticket.events.length,
     aiOutcome: lastOutcomeBefore(ticket, escalationEvent?.createdAt ?? ticket.createdAt),
+    replies: ticket.replies ?? [],
   };
 }

@@ -197,6 +197,20 @@ export interface ApiTicketDetail extends ApiTicketSummary {
   originalQuestion: string;
   messages: ApiMessage[];
   events: ApiTicketEvent[];
+  /** Staff replies sent from the composer, oldest first. Each carries
+   *  its honest dispatch outcome (emailDispatched + note). */
+  replies: ApiStaffReply[];
+}
+
+/** One stored staff reply — what was sent, to whom, delivered or not. */
+export interface ApiStaffReply {
+  id: string;
+  staffName: string;
+  body: string;
+  sentTo: string;
+  emailDispatched: boolean;
+  dispatchNote: string | null;
+  createdAt: string;
 }
 
 export interface ApiTicketCounts {
@@ -598,6 +612,16 @@ export const api = {
               ? { status, actor }
               : { status, actor, expectedStatus },
         },
+      ),
+
+    /** POST /api/v1/admin/escalations/{id}/replies — send one reply to
+     *  the ticket's customer email. The stored record reports the honest
+     *  dispatch outcome (emailDispatched=false + note when SMTP is not
+     *  configured server-side — never a fake "sent"). */
+    sendReply: (ticketId: string, message: string): Promise<ApiStaffReply> =>
+      request<ApiStaffReply>(
+        `/api/v1/admin/escalations/${encodeURIComponent(ticketId)}/replies`,
+        { method: "POST", body: { message } },
       ),
   },
 

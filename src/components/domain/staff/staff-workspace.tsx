@@ -339,6 +339,25 @@ export function SupportStaffWorkspace() {
     void fetchPage(tickets.length, true);
   }, [fetchPage, loading, loadingMore, tickets.length, total]);
 
+  const handleSendReply = useCallback(
+    async (ticketId: string, message: string) => {
+      if (!authed) throw new ApiError("Sign in to send replies.", { status: 401 });
+      const reply = await api.tickets.sendReply(ticketId, message);
+      toast({
+        title: reply.emailDispatched
+          ? `Reply sent to ${reply.sentTo}`
+          : "Reply stored — email not delivered",
+        description: reply.emailDispatched
+          ? `${ticketId} · by ${reply.staffName}`
+          : (reply.dispatchNote ?? "The message is recorded with the ticket."),
+        tone: reply.emailDispatched ? "success" : "info",
+      });
+      // Refresh the stored reply history from the server (never local state).
+      void fetchDetail(ticketId);
+    },
+    [authed, fetchDetail, toast],
+  );
+
   // Probing the stored token — quiet full-screen spinner.
   if (authState.phase === "checking") {
     return (
@@ -474,6 +493,7 @@ export function SupportStaffWorkspace() {
                   staleNotice={staleNotice}
                   onBack={() => setMobileView("queue")}
                   pulse={pulseId === selectedId}
+                  onSendReply={handleSendReply}
                 />
               </div>
             </div>

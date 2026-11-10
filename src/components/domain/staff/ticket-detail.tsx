@@ -1,18 +1,20 @@
 "use client";
 
-import { ArrowLeft, Bot, Check, Copy, Mail, Ticket, UserRound, Phone } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, ArrowLeft, Bot, Check, Copy, Mail, Send, Ticket, UserRound, Phone } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Textarea } from "@/components/ui/textarea";
 import { StaffTimeline } from "./staff-timeline";
 import { cn } from "@/lib/utils";
 import {
   AI_OUTCOME_LABEL,
   AI_OUTCOME_VARIANT,
+  formatTicketTime,
   type StaffTicketDetail,
 } from "@/lib/staff/ticket-view";
 import { STATUS_OPTIONS, STATUS_LABEL, type TicketStatus } from "@/lib/support/tickets";
@@ -28,6 +30,10 @@ interface TicketDetailProps {
   onBack: () => void;
   /** One soft pulse right after a status transition. */
   pulse?: boolean;
+  /** Send one reply to the ticket's customer email (stored + dispatched
+   *  server-side; the workspace refreshes the detail and toasts). Throws
+   *  ApiError so the composer can show the failure inline. */
+  onSendReply: (ticketId: string, message: string) => Promise<void>;
 }
 
 /** Mono ticket id with click-to-copy (clipboard API; transient check). */
@@ -88,6 +94,142 @@ function DetailSkeleton() {
 }
 
 /**
+ * Reply composer — write a message and send it straight to the selected
+ * ticket's customer email. Every send is stored server-side with an
+ * honest dispatch outcome; the sent history below renders those stored
+ * records only.
+ */
+function ReplyComposer({
+  ticket,
+  onSendReply,
+}: {
+  ticket: StaffTicketDetail;
+  onSendReply: (ticketId: string, message: string) => Promise<void>;
+}) {
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    const message = body.trim();
+    if (sending) return;
+    if (!message) {
+      setError("Write a message before sending.");
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      await onSendReply(ticket.id, message);
+      setBody("");
+    } catch (sendError) {
+      setError(
+        sendError instanceof Error && sendError.message
+          ? sendError.message
+          : "The reply could not be sent. Nothing was lost — try again."
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(event) => void handleSubmit(event)}
+      className="mt-8 rounded-card border border-line bg-surface-1 p-4"
+      noValidate
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+          Reply to customer
+        </p>
+        <span className="flex items-center gap-1.5 text-xs text-ink-secondary">
+          <Mail aria-hidden="true" className="size-3.5 text-ink-muted" />
+          {ticket.customer.email}
+        </span>
+      </div>
+
+      <Textarea
+        value={body}
+        onChange={(event) => {
+          setBody(event.target.value);
+          if (error) setError(null);
+        }}
+        placeholder="Write the message the customer will receive by email…"
+        aria-label="Reply message"
+        maxLength={4000}
+        rows={4}
+        className="mt-3"
+      />
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p aria-live="polite" className="text-xs text-danger-ink">
+          {error ?? ""}
+        </p>
+        <span className="text-[11px] tabular-nums text-ink-muted">
+          {body.length}/4000
+        </span>
+      </div>
+
+      <div className="mt-2 flex justify-end">
+        <Button type="submit" size="sm" loading={sending} disabled={!body.trim()}>
+          <Send aria-hidden="true" />
+          Send to {ticket.customer.name.split(" ")[0] || "customer"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Stored record of every reply sent from this workspace. */
+function SentReplies({ ticket }: { ticket: StaffTicketDetail }) {
+  if (ticket.replies.length === 0) return null;
+
+  return (
+    <section aria-label="Sent replies" className="mt-6">
+      <h3 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+        Sent replies ({ticket.replies.length})
+      </h3>
+      <ul className="space-y-3">
+        {ticket.replies.map((reply) => (
+          <li key={reply.id} className="rounded-card border border-line bg-canvas p-4">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-sm font-medium text-ink">{reply.staffName}</span>
+              <span aria-hidden="true" className="text-ink-muted">·</span>
+              <span className="text-xs tabular-nums text-ink-muted">
+                {formatTicketTime(reply.createdAt)}
+              </span>
+              <span className="ml-auto">
+                {reply.emailDispatched ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-success-border bg-success-soft px-2 py-0.5 text-[10px] font-medium text-success-ink">
+                    <Check aria-hidden="true" className="size-3" />
+                    Emailed to {reply.sentTo}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-warning-border bg-warning-soft px-2 py-0.5 text-[10px] font-medium text-warning-ink">
+                    <AlertTriangle aria-hidden="true" className="size-3" />
+                    Stored — not delivered
+                  </span>
+                )}
+              </span>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink">
+              {reply.body}
+            </p>
+            {!reply.emailDispatched && reply.dispatchNote && (
+              <p className="mt-2 text-[11px] leading-relaxed text-warning-ink">
+                {reply.dispatchNote}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
  * Ticket detail: answers "what did the customer ask, what did the AI
  * already try, why was this escalated" from stored server data only.
  * Status changes are sent to the API and applied from its response; the
@@ -103,6 +245,7 @@ export function TicketDetail({
   staleNotice,
   onBack,
   pulse = false,
+  onSendReply,
 }: TicketDetailProps) {
   if (!ticket && loading) {
     return (
@@ -304,6 +447,10 @@ export function TicketDetail({
             </div>
             <StaffTimeline rows={ticket.messages} customerName={ticket.customer.name} />
           </section>
+
+          {/* Reply to the customer straight from this view */}
+          <ReplyComposer ticket={ticket} onSendReply={onSendReply} />
+          <SentReplies ticket={ticket} />
         </div>
       </div>
     </div>

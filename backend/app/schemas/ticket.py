@@ -39,6 +39,24 @@ class TicketStatusUpdate(ApiModel):
     expected_status: TicketStatus | None = None
 
 
+class StaffReplyCreate(ApiModel):
+    """Body of one staff reply, sent to the ticket's customer email."""
+
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class StaffReplyOut(ApiModel):
+    """Stored record of a sent reply — what, to whom, delivered or not."""
+
+    id: str
+    staff_name: str
+    body: str
+    sent_to: str
+    email_dispatched: bool
+    dispatch_note: str | None = None
+    created_at: datetime
+
+
 class TicketEventOut(ApiModel):
     id: str
     event_type: str
@@ -66,6 +84,10 @@ class TicketDetailOut(TicketSummaryOut):
     original_question: str
     messages: list[MessageOut] = []
     events: list[TicketEventOut] = []
+    # Staff replies sent from the composer, oldest first. Every reply
+    # reports whether its email actually went out (honest dispatch
+    # state) — the UI renders this stored history, never local state.
+    replies: list[StaffReplyOut] = []
 
 
 class ConversationTicketOut(ApiModel):

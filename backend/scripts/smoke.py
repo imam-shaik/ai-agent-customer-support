@@ -17,6 +17,13 @@ never silent fakes:
   deterministic guard in EVERY mode — it short-circuits with zero LLM
   calls, so it works even without credentials.
 
+Staff endpoints require a signed-in session: the run registers (first
+time) or logs into a dedicated smoke staff account and sends the bearer
+token on every admin call. The ticket and conversation created here are
+DELETED at the end, so the staff queue keeps only tickets raised through
+the real customer flow — no smoke pollution, matching the no-pollution
+design of the knowledge-base checks.
+
 Usage (from backend/):
     python scripts/smoke.py [base_url]     # default http://127.0.0.1:8000
 """
@@ -29,6 +36,10 @@ import httpx
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
 FAILURES: list[str] = []
+
+# Dedicated smoke identity label — a fresh account is registered per run
+# (see main) so the script never depends on a stored password.
+SMOKE_NAME = "Smoke Runner"
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -68,6 +79,26 @@ def main() -> int:
     # --- ops ---
     health = client.get("/health").json()
     check("GET /health", health.get("status") == "ok", str(health))
+
+    # --- staff sign-in (Phase 11) ---
+    # Admin endpoints require a session. Each run registers a fresh,
+    # clearly-labeled smoke account (register is authoritative and never
+    # depends on knowing a previous run's password).
+    smoke_email = f"smoke-{uuid.uuid4().hex[:10]}@example.com"
+    registered = client.post(
+        "/api/v1/auth/register",
+        json={"name": SMOKE_NAME, "email": smoke_email, "password": f"smoke-{uuid.uuid4().hex[:16]}"},
+    )
+    check(
+        "POST /auth/register -> 201",
+        registered.status_code == 201,
+        registered.text,
+    )
+    token = registered.json().get("token")
+    auth_headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if not token:
+        print("[FAIL] could not obtain a staff token; admin checks will fail")
+
 
     # --- chat (Phase 8B decision layer) ---
     session = client.post("/api/v1/chat/sessions", json={})
@@ -350,7 +381,11 @@ def main() -> int:
         duplicate.text,
     )
 
-    queue = client.get("/api/v1/admin/escalations", params={"status": "OPEN"})
+    queue = client.get(
+        "/api/v1/admin/escalations",
+        params={"status": "OPEN"},
+        headers=auth_headers,
+    )
     queue_body = queue.json()
     check(
         "GET /admin/escalations filtered",
@@ -362,7 +397,9 @@ def main() -> int:
     bad_filter = client.get("/api/v1/admin/escalations", params={"status": "BOGUS"})
     check("invalid status filter -> 422", bad_filter.status_code == 422, bad_filter.text)
 
-    detail = client.get(f"/api/v1/admin/escalations/{ticket['id']}")
+    detail = client.get(
+        f"/api/v1/admin/escalations/{ticket['id']}", headers=auth_headers
+    )
     check(
         "GET escalation detail",
         detail.status_code == 200 and detail.json()["id"] == ticket["id"],
@@ -372,6 +409,7 @@ def main() -> int:
     status_change = client.patch(
         f"/api/v1/admin/escalations/{ticket['id']}/status",
         json={"status": "IN_PROGRESS", "actor": "maya.chen"},
+        headers=auth_headers,
     )
     changed = status_change.json()
     events = [e for e in changed.get("events", []) if e["eventType"] == "status_changed"]
@@ -385,11 +423,15 @@ def main() -> int:
     )
 
     bad_status = client.patch(
-        f"/api/v1/admin/escalations/{ticket['id']}/status", json={"status": "CLOSED"}
+        f"/api/v1/admin/escalations/{ticket['id']}/status",
+        json={"status": "CLOSED"},
+        headers=auth_headers,
     )
     check("invalid status value -> 422", bad_status.status_code == 422, bad_status.text)
 
-    not_found = client.get("/api/v1/admin/escalations/NSD-2026-0000")
+    not_found = client.get(
+        "/api/v1/admin/escalations/NSD-2026-0000", headers=auth_headers
+    )
     check(
         "unknown ticket -> 404 envelope",
         not_found.status_code == 404
@@ -576,6 +618,38 @@ def main() -> int:
         )
     else:
         check("retrieval search -> 200 or documented 503", False, search.text)
+
+    # --- cleanup: leave NO smoke tickets behind -------------------------
+    # The staff queue must contain only tickets raised through the real
+    # customer flow (same principle as the archived smoke document: the
+    # artifact is fully exercised, then removed). Direct DB delete — the
+    # API deliberately offers no destructive admin endpoint.
+    cleaned = False
+    if ticket.get("id") and token:
+        try:
+            sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+            from app.db.session import SessionLocal
+            from app.models import Conversation, Ticket
+
+            with SessionLocal() as db:
+                row = db.get(Ticket, ticket["id"])
+                if row is not None:
+                    conversation = row.conversation_id
+                    db.delete(row)  # events + replies cascade
+                    db.commit()
+                    conversation_row = db.get(Conversation, conversation)
+                    if conversation_row is not None and not conversation_row.tickets:
+                        db.delete(conversation_row)  # messages + citations cascade
+                        db.commit()
+                    cleaned = True
+        except Exception as cleanup_error:  # noqa: BLE001 — never hide test results
+            print(f"[NOTE] smoke cleanup could not run: {cleanup_error}")
+    check(
+        "smoke ticket removed (queue stays clean)",
+        cleaned,
+        f"ticket {ticket.get('id')} was left in the staff queue — "
+        "run `python scripts/clear_tickets.py`",
+    )
 
     client.close()
 

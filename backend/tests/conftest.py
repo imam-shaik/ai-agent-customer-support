@@ -47,6 +47,13 @@ os.environ["NVIDIA_API_KEY"] = ""
 os.environ["EMBEDDING_QUERY_PREFIX"] = ""
 os.environ["EMBEDDING_PASSAGE_PREFIX"] = ""
 os.environ["EMBEDDING_DIMENSIONS"] = "2048"
+# Staff reply email dispatch must also be hermetic: a developer's
+# backend/.env must never make tests send real email (and the honest
+# not-configured state is what the reply tests assert).
+os.environ["SMTP_HOST"] = ""
+os.environ["SMTP_USERNAME"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+os.environ["SMTP_FROM"] = ""
 # Demo/Live mode is persisted in a file; keep the suite hermetic and
 # reset it to Live for every test (demo-mode tests switch explicitly).
 _PROVIDER_MODE_FILE = _BACKEND_DIR / "data" / "provider-mode-test.json"
