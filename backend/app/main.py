@@ -70,7 +70,14 @@ def create_app() -> FastAPI:
         # without it the browser rejects their preflight and key saving
         # cannot work from the UI.
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Request-ID"],
+        # Authorization is REQUIRED since staff authentication (Phase 11):
+        # every staff-side request carries `Authorization: Bearer <token>`,
+        # which makes the browser send a CORS preflight that names the
+        # header. Without it in this list the preflight is answered 400
+        # ("Disallowed CORS header") and EVERY staff call fails from the
+        # browser only — offline pill, empty queue — while API-level
+        # clients (curl/TestClient, no preflights) keep working.
+        allow_headers=["Accept", "Content-Type", "Authorization", "X-Request-ID"],
         expose_headers=["X-Request-ID"],
     )
 
