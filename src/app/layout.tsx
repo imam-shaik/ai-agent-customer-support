@@ -52,6 +52,23 @@ const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem("vilasat.t
  */
 const EXTENSION_ATTR_CLEANUP_SCRIPT = `(function(){try{var a=["bis_skin_checked","bis_register"];function c(){var n=document.querySelectorAll("[bis_skin_checked],[bis_register]");for(var i=0;i<n.length;i++){for(var j=0;j<a.length;j++){n[i].removeAttribute(a[j])}}}c();if(typeof MutationObserver==="undefined"){return}var o=new MutationObserver(function(){c()});o.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:a});window.addEventListener("load",function(){setTimeout(function(){o.disconnect()},5000)})}catch(e){}})();`;
 
+/**
+ * Keeps browser-extension failures out of the dev overlay WITHOUT hiding
+ * application errors. Extensions that hook fetch (Bing, translators, ad
+ * blockers…) run their own async work around every request; when that
+ * internal work throws — e.g. "Failed to fetch" from their service
+ * worker — the rejection escapes UNHANDLED into the page context and
+ * Next.js's dev overlay reports each one as a runtime issue (the staff
+ * queue showed 4 from a single render: health, mode, providers, tickets).
+ *
+ * The filter is deliberately narrow: a rejection/error is silenced ONLY
+ * when its stack contains an extension frame (chrome-extension:// /
+ * moz-extension://). Genuine application errors never carry extension
+ * frames — client.ts converts its own network failures into typed
+ * ApiErrors handled in-component — so they keep surfacing normally.
+ */
+const EXTENSION_ERROR_FILTER_SCRIPT = `(function(){try{var ext=/^(chrome|moz)-extension:\\/\\//;function fromExtension(r){if(!r){return false}if(typeof r.stack==="string"&&ext.test(r.stack)){return true}if(typeof r.message==="string"&&r.message.indexOf("chrome-extension://")!==-1){return true}return false}window.addEventListener("unhandledrejection",function(e){if(fromExtension(e.reason)){e.preventDefault()}});window.addEventListener("error",function(e){if(fromExtension(e.error)||ext.test(e.filename||"")){e.preventDefault()}},true)}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
@@ -67,6 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: EXTENSION_ATTR_CLEANUP_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: EXTENSION_ERROR_FILTER_SCRIPT }} />
         <Providers>{children}</Providers>
       </body>
     </html>
