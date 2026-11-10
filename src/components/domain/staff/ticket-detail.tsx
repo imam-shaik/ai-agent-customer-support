@@ -100,24 +100,40 @@ function DetailSkeleton() {
 /**
  * Reply composer — write a message and hand it to Gmail.
  *
- * Clicking "Send via Gmail" opens Gmail's compose window with the
- * recipient, subject, and message pre-filled; the staff member presses
- * Send there to actually deliver the email. The window uses a PERSISTENT
- * TARGET NAME, so the first send opens the tab and every later send
- * REUSES it (navigating to a fresh compose + focusing) instead of
- * spawning a new tab per reply; if the user closed it, the next send
- * opens a new one. (A page can only reuse windows it named — browsers
- * forbid touching unrelated tabs.)
- *
- * The reply is still STORED with the ticket (channel "gmail", honestly
- * marked as a hand-off — the app cannot see Gmail's outbox), so the
- * sent history below renders those stored records.
+ * Clicking "Send via Gmail" opens (or REUSES) one Gmail compose tab
+ * with the recipient, subject, and message pre-filled; the staff member
+ * presses Send there to actually deliver the email. The reply is still
+ * STORED with the ticket (channel "gmail", honestly marked as a
+ * hand-off — the app cannot see Gmail's outbox), so the sent history
+ * below renders those stored records.
  *
  * Popup-safety: window.open runs synchronously inside the click handler
  * (user gesture intact). If the store call then fails, the opened tab
  * is closed again and the error is shown inline.
  */
-const GMAIL_COMPOSE_WINDOW = "vilasat-staff-gmail-compose";
+/**
+ * The reused Gmail compose tab. Module-level so the WindowProxy survives
+ * across replies (and ticket switches) for the whole app session.
+ *
+ * Why not a named window target: browsers CLEAR a window's name when it
+ * navigates cross-origin (anti-tracking), so the name-based reuse broke
+ * the moment Gmail loaded. A live WindowProxy reference does survive —
+ * re-navigating it via location.href is the one cross-origin write the
+ * platform allows. (A Gmail tab the USER opened themselves can never be
+ * commandeered — browsers forbid touching unrelated tabs.)
+ */
+let gmailComposeTab: WindowProxy | null = null;
+
+function openOrReuseGmailCompose(url: string): WindowProxy | null {
+  if (gmailComposeTab && !gmailComposeTab.closed) {
+    // Reuse: navigate the existing tab to the fresh compose + focus it.
+    gmailComposeTab.location.href = url;
+    gmailComposeTab.focus();
+    return gmailComposeTab;
+  }
+  gmailComposeTab = window.open(url, "_blank");
+  return gmailComposeTab;
+}
 
 function ReplyComposer({
   ticket,
@@ -156,10 +172,14 @@ function ReplyComposer({
     }
 
     // Open synchronously inside the gesture — a window.open after an
-    // await is treated as a popup and blocked by browsers. The named
-    // target reuses the existing Gmail compose tab when there is one.
-    const gmailTab = window.open(gmailComposeUrl(), GMAIL_COMPOSE_WINDOW);
-    gmailTab?.focus();
+    // await is treated as a popup and blocked by browsers.
+    const gmailTab = openOrReuseGmailCompose(gmailComposeUrl());
+    if (!gmailTab) {
+      setError(
+        "Your browser blocked the Gmail tab. Allow popups for this site, then try again — nothing was sent yet."
+      );
+      return;
+    }
 
     setSending(true);
     setError(null);
@@ -168,7 +188,7 @@ function ReplyComposer({
       setBody("");
     } catch (sendError) {
       // The reply was NOT stored — don't leave a dangling Gmail tab.
-      if (gmailTab && !gmailTab.closed) gmailTab.close();
+      if (!gmailTab.closed) gmailTab.close();
       setError(
         sendError instanceof Error && sendError.message
           ? sendError.message
