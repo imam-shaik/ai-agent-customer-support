@@ -6,6 +6,8 @@ from app.models.entities import (
     DocumentChunk,
     Feedback,
     Message,
+    StaffSession,
+    StaffUser,
     Ticket,
     TicketEvent,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "DocumentChunk",
     "Feedback",
     "Message",
+    "StaffSession",
+    "StaffUser",
     "Ticket",
     "TicketEvent",
 ]

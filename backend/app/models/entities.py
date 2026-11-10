@@ -344,3 +344,53 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     message: Mapped[Message] = relationship(back_populates="feedback")
+
+
+class StaffUser(Base):
+    """A support-team member who can sign in to the staff workspace.
+
+    The first account is created through the workspace's sign-up screen
+    ("create the login first"); later sign-ins reuse it. Emails are
+    normalized to lowercase and unique — the email is the login id.
+    """
+
+    __tablename__ = "staff_users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
+    # PBKDF2-SHA256 parameter string (see services/auth_service.py) —
+    # never a raw or reversible password.
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    sessions: Mapped[list["StaffSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class StaffSession(Base):
+    """One bearer-token sign-in session.
+
+    Only the SHA-256 hash of the token is stored — a database leak can
+    never reveal a usable bearer token, and logout simply deletes the
+    row. Expiry is enforced at verification time (never trusted from the
+    client); expired rows are deleted when encountered and pruned at
+    sign-in.
+    """
+
+    __tablename__ = "staff_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("staff_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    user: Mapped[StaffUser] = relationship(back_populates="sessions")

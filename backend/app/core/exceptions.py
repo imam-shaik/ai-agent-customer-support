@@ -35,6 +35,17 @@ class NotFoundError(AppError):
     code = "NOT_FOUND"
 
 
+class UnauthorizedError(AppError):
+    """Missing, invalid, or expired staff credentials (401).
+
+    The message is safe to display: it never says whether an email
+    exists or which part of the credential failed.
+    """
+
+    status_code = 401
+    code = "UNAUTHORIZED"
+
+
 class ConflictError(AppError):
     status_code = 409
     code = "CONFLICT"

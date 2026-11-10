@@ -3,7 +3,9 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_staff
 from app.db.session import get_db
+from app.models.entities import StaffUser
 from app.schemas.ticket import (
     ConversationTicketListOut,
     EscalationCreate,
@@ -68,8 +70,9 @@ def list_escalations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_staff: StaffUser = Depends(get_current_staff),
 ) -> TicketListOut:
-    """List escalation tickets, newest first."""
+    """List escalation tickets, newest first. 401 — not signed in."""
     return TicketService(db).list_tickets(
         status=ticket_status, query=q, limit=limit, offset=offset
     )
@@ -80,9 +83,13 @@ def list_escalations(
     response_model=TicketDetailOut,
     status_code=status.HTTP_200_OK,
 )
-def get_escalation(ticket_id: str, db: Session = Depends(get_db)) -> TicketDetailOut:
+def get_escalation(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_staff: StaffUser = Depends(get_current_staff),
+) -> TicketDetailOut:
     """Ticket detail: customer, original question, conversation with
-    assistant replies + citations, lifecycle events."""
+    assistant replies + citations, lifecycle events. 401 — not signed in."""
     return TicketService(db).get_detail(ticket_id)
 
 
@@ -95,10 +102,12 @@ def update_escalation_status(
     ticket_id: str,
     payload: TicketStatusUpdate,
     db: Session = Depends(get_db),
+    current_staff: StaffUser = Depends(get_current_staff),
 ) -> TicketDetailOut:
     """Change ticket status (OPEN | IN_PROGRESS | RESOLVED).
 
     A status_changed event is recorded in the ticket history. 404 for an
-    unknown ticket; 422 for an unsupported status value.
+    unknown ticket; 422 for an unsupported status value; 401 — not
+    signed in.
     """
     return TicketService(db).update_status(ticket_id, payload)

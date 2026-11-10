@@ -138,6 +138,12 @@ class Settings(BaseSettings):
     # at sentence boundaries (see ingestion/pipeline.py).
     chunk_overlap_chars: int = 120
 
+    # --- Staff authentication (Phase 11) ---
+    # How long a staff bearer token stays valid after sign-in. Verified
+    # server-side on every request; expired sessions are deleted, never
+    # honored.
+    auth_session_ttl_days: int = 7
+
     @field_validator("cors_origins", mode="after")
     @classmethod
     def _strip_origins(cls, value: str) -> str:
@@ -259,6 +265,13 @@ class Settings(BaseSettings):
     def _validate_context_chars(cls, value: int) -> int:
         if value < 100:
             raise ValueError("agent_context_max_chars must be >= 100")
+        return value
+
+    @field_validator("auth_session_ttl_days", mode="after")
+    @classmethod
+    def _validate_session_ttl(cls, value: int) -> int:
+        if not 1 <= value <= 90:
+            raise ValueError("auth_session_ttl_days must be within [1, 90]")
         return value
 
     @property

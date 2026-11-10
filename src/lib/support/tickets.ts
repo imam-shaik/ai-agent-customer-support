@@ -18,6 +18,3 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
   in_progress: "In progress",
   resolved: "Resolved",
 };
-
-/** Demo identity until staff authentication exists (production gate). */
-export const STAFF_MEMBER = "Maya Chen";

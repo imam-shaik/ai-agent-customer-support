@@ -105,6 +105,28 @@ def reset_provider_mode():
         set_mode("live")
 
 
+@pytest.fixture(autouse=True)
+def staff_auth_bypass():
+    """Admin escalation endpoints require a staff session; the existing
+    suite exercises them without one. Override the dependency for every
+    test — test_auth.py removes the override to exercise the real
+    register/login/verify flow. Restored after each test.
+    """
+    from app.api.deps import get_current_staff
+    from app.main import app
+    from app.models.entities import StaffUser
+
+    fake_staff = StaffUser(
+        id="test-staff-user",
+        name="Test Staff",
+        email="test-staff@example.com",
+        password_hash="not-a-real-hash",
+    )
+    app.dependency_overrides[get_current_staff] = lambda: fake_staff
+    yield
+    app.dependency_overrides.pop(get_current_staff, None)
+
+
 @pytest.fixture()
 def db_session():
     from app.db.session import SessionLocal

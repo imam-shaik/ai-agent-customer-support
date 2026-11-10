@@ -13,6 +13,7 @@
  */
 
 import type { Citation } from "@/lib/support/knowledge";
+import { getToken } from "@/lib/staff/session";
 
 const BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000"
@@ -321,6 +322,42 @@ export interface ApiProviderVerify {
 }
 
 /* ------------------------------------------------------------------ */
+/* Staff authentication — register/login return the bearer token once; */
+/* the client stores it (lib/staff/session) and every request attaches */
+/* it as Authorization: Bearer until sign-out or a 401.                */
+/* ------------------------------------------------------------------ */
+
+export interface ApiStaffUser {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface ApiAuthSession {
+  token: string;
+  expiresAt: string;
+  user: ApiStaffUser;
+}
+
+export interface ApiAuthStatus {
+  /** False → first run: the workspace opens on the create-account screen. */
+  hasStaffUser: boolean;
+}
+
+export interface ApiAuthRegister {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface ApiAuthLogin {
+  email: string;
+  password: string;
+}
+
+/* ------------------------------------------------------------------ */
 /* Status mapping helpers (API canonical ↔ staff UI contract)          */
 /* ------------------------------------------------------------------ */
 
@@ -353,13 +390,22 @@ async function request<T>(
   init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
+  const token = getToken();
+  const headers: Record<string, string> | undefined =
+    init.body === undefined
+      ? token
+        ? { Authorization: `Bearer ${token}` }
+        : undefined
+      : {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
   let response: Response;
 
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       method,
-      headers:
-        init.body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: init.signal,
     });
@@ -405,6 +451,27 @@ async function request<T>(
 
 export const api = {
   health: (): Promise<ApiHealth> => request<ApiHealth>("/health"),
+
+  auth: {
+    /** GET /api/v1/auth/status — first-run probe (create vs. sign in). */
+    status: (): Promise<ApiAuthStatus> => request<ApiAuthStatus>("/api/v1/auth/status"),
+
+    /** POST /api/v1/auth/register — create the staff account + sign in.
+     *  409 — the email is already registered. */
+    register: (payload: ApiAuthRegister): Promise<ApiAuthSession> =>
+      request<ApiAuthSession>("/api/v1/auth/register", { method: "POST", body: payload }),
+
+    /** POST /api/v1/auth/login — 401 for unknown email OR wrong password
+     *  (identical message; the API never reveals which accounts exist). */
+    login: (payload: ApiAuthLogin): Promise<ApiAuthSession> =>
+      request<ApiAuthSession>("/api/v1/auth/login", { method: "POST", body: payload }),
+
+    /** GET /api/v1/auth/me — 401 when the stored token is gone/expired. */
+    me: (): Promise<ApiStaffUser> => request<ApiStaffUser>("/api/v1/auth/me"),
+
+    /** POST /api/v1/auth/logout — invalidates the token server-side. */
+    logout: (): Promise<void> => request<void>("/api/v1/auth/logout", { method: "POST" }),
+  },
 
   providers: {
     /** GET /api/v1/admin/provider-settings — booleans + masks, never keys. */
