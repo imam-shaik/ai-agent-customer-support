@@ -43,7 +43,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}
     >
-      <body>
+      {/* suppressHydrationWarning on <body> (like <html>): browser
+          extensions (Bing's bis_skin_checked/bis_register, Grammarly,
+          translators…) mutate the DOM BEFORE React hydrates, which would
+          otherwise flood dev with attribute-mismatch warnings that are
+          not caused by application code. */}
+      <body suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <Providers>{children}</Providers>
       </body>
