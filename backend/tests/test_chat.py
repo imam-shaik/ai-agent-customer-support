@@ -111,15 +111,18 @@ class TestReplyKinds:
         # Typed application text only — no model wording:
         assert reply["text"]
 
-    def test_greeting_returns_typed_uncertain(self, client: TestClient):
+    def test_greeting_returns_typed_greeting(self, client: TestClient):
         turn = _turn(client, _session(client), "hello there")
         reply = turn["assistantMessage"]["reply"]
-        # A greeting carries no material words: coverage passes vacuously,
-        # the model declines to ground (citation_ids: []), and Q2 maps
-        # that to UNCERTAIN — never an invented answer.
-        assert reply["kind"] == "uncertain"
-        assert reply["escalationOffer"]
+        # 8b-4 small talk: the ASSESSMENT call classifies greetings as
+        # small_talk BEFORE any retrieval, and the application answers
+        # with its own typed greeting — zero generation calls, no model
+        # wording, no citations, no escalation offer (small talk is not
+        # a dead end).
+        assert reply["kind"] == "greeting"
+        assert reply["text"].startswith("Hi!")
         assert turn["assistantMessage"]["citations"] == []
+        assert "escalationOffer" not in reply
 
 
 class TestValidation:

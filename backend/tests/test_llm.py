@@ -400,6 +400,27 @@ class TestFourTaskPrompts:
         assert "citation_ids" in prompts[TASK_GENERATION]
         assert "candidate answer" in prompts[TASK_SUPPORT].lower()
 
+    def test_generation_demands_elaboration_not_transcription(self):
+        """8b-5: the answer must be a step-by-step explanation in the
+        model's own words that uses the full evidence — the documented
+        exact shape stays unchanged."""
+        prompt = build_system_prompt(TASK_GENERATION)
+        assert "EXPLAIN, DO NOT TRANSCRIBE" in prompt
+        assert "numbered steps" in prompt
+        assert "Use the evidence FULLY" in prompt
+        # The grounding boundary stays explicit alongside elaboration:
+        assert "facts only from the evidence" in prompt
+        assert '{"answer": "...", "citation_ids": ["E1"]}' in prompt
+
+    def test_support_judge_accepts_rephrasing_rejects_new_facts(self):
+        """8b-5: rephrasing/summarizing/numbering are SUPPORTED; only a
+        NEW fact is exceeds_evidence — this is what lets detailed
+        answers survive signal D instead of being killed as additions."""
+        prompt = build_system_prompt(TASK_SUPPORT)
+        assert "not violations" in prompt
+        assert "Judge the FACTS" in prompt
+        assert 'category="exceeds_evidence" ONLY when the answer introduces a NEW fact' in prompt
+
     @pytest.mark.parametrize(
         "task,shape",
         [
@@ -430,7 +451,13 @@ class TestFourTaskPrompts:
     def test_instructions_version_is_pinned(self):
         # 8b-2: assessment emits a spelling-corrected search_query and
         # treats spelling mistakes as non-ambiguity (typo tolerance).
-        assert INSTRUCTIONS_VERSION == "8b-2"
+        # 8b-3: generation answers without raw double quotes so quoted UI
+        # labels in the evidence cannot break the JSON reply.
+        # 8b-4: assessment classifies small talk via small_talk.
+        # 8b-5: generation EXPLAINS (own words, numbered steps, full use
+        # of the evidence); the support judge accepts rephrasing and only
+        # rejects NEW facts — detailed answers survive signal D.
+        assert INSTRUCTIONS_VERSION == "8b-5"
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +591,11 @@ class TestDecisionSchemas:
                 {"ambiguous": False, "clarification": "", "options": [], "confidence": 1}
             )
 
+    def test_assessment_small_talk_defaults_false(self):
+        # Absent flag (stub assessments, older prompts) behaves as before.
+        assessment = QuestionAssessment.model_validate({"ambiguous": False})
+        assert assessment.small_talk is False
+
     def test_evidence_verdict_rejects_unknown_verdict(self):
         with pytest.raises(ValidationError):
             EvidenceVerdict.model_validate(
@@ -622,6 +654,15 @@ class TestStubTaskAwareness:
     def test_stub_keeps_clear_question_unambiguous(self):
         payload = self._assess("How do I reset my password?")
         assert payload == {"ambiguous": False, "clarification": "", "options": []}
+
+    def test_stub_classifies_short_greeting_as_small_talk(self):
+        payload = self._assess("hello there")
+        assert payload.get("small_talk") is True
+
+    def test_stub_keeps_long_mixed_message_answerable(self):
+        # A real question that merely starts with "hi" is NOT small talk.
+        payload = self._assess("hi there, how do I reset my password?")
+        assert payload.get("small_talk", False) is False
 
     def test_stub_evidence_verdict_never_claims_conflict(self):
         """Honest limitation: the stub has no semantic model of
