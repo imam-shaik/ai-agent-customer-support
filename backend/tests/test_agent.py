@@ -264,10 +264,13 @@ class TestMalformedOutput:
     def test_malformed_first_attempt_is_retried_once(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        """A transient malformed first answer is re-asked ONCE (the live
-        ~7% failure mode), then validated like any other answer. The
-        retry is bounded: consecutive failures still raise 502, which
-        the static-garbage tests above already exercise."""
+        """A transient malformed first answer is re-asked ONCE with a
+        corrective instruction (the live failure mode: at temperature 0
+        an IDENTICAL retry would return the same malformed bytes — the
+        corrective re-ask names the defect and recovered 4/4 live
+        samples), then validated like any other answer. The retry is
+        bounded: consecutive failures still raise 502, which the
+        static-garbage tests above already exercise."""
 
         class FirstAttemptMalformed(ScriptedProvider):
             """First generation call returns malformed JSON; every later
@@ -296,8 +299,15 @@ class TestMalformedOutput:
 
         assert decision.kind == DECISION_GROUNDED
         assert decision.text == "Reset it from the login page."
-        # malformed first attempt + one retry (identical prompt)
+        # malformed first attempt + one corrective retry
         assert len(provider.generation_calls()) == 2
+        # The retry prompt MUST differ from the first: it names the JSON
+        # defect so a deterministic model can fix its serialization.
+        first_prompt = provider.generation_calls()[0].user_prompt
+        retry_prompt = provider.generation_calls()[1].user_prompt
+        assert retry_prompt != first_prompt
+        assert "CRITICAL CORRECTION" in retry_prompt
+        assert first_prompt.startswith(retry_prompt[: len(first_prompt)])
 
 
 # ---------------------------------------------------------------------------

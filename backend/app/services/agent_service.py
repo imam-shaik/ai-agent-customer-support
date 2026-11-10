@@ -112,6 +112,20 @@ _ASSESSMENT_MESSAGE = (
     "was persisted. The turn is safe to retry."
 )
 
+# Appended to the generation prompt ONLY on the corrective re-ask (see the
+# retry in run_agent_turn): names the observed defect precisely and demands
+# a clean re-serialization. Content may stay the same — only the JSON
+# formatting has to change.
+GENERATION_CORRECTION = (
+    "\n\nCRITICAL CORRECTION: your previous reply was REJECTED because it "
+    "was not valid JSON — a string value was not closed before the next "
+    "field. Reply AGAIN with the raw JSON object only, exactly in this "
+    'shape: {"answer": "...", "citation_ids": ["E1"]} — every string value '
+    "properly opened and closed, no double quote characters inside the "
+    "answer text, and nothing after the closing brace. Your answer content "
+    "can stay the same; only the JSON formatting needs to be correct."
+)
+
 # --- Layer 2: deterministic input safety (§7) -------------------------------
 # Curated pattern screen, deliberately NOT claimed exhaustive: undetected
 # attempts fall through to the normal pipeline where the structural
@@ -409,16 +423,36 @@ def run_agent_turn(
     try:
         generation = generate()
     except GenerationFailedError:
-        # One bounded re-ask. At temperature 0 the model is near-
-        # deterministic but not bit-stable: live runs show it occasionally
-        # folds `citation_ids` into the answer string, yielding malformed
-        # JSON (~7% of generation calls). The retry sends the IDENTICAL
-        # prompt, so a valid re-ask returns the same answer a first-try
-        # success would; a second failure raises the same 502 as before.
+        # One bounded re-ask with a CORRECTIVE instruction. At temperature
+        # 0 the model is near-deterministic: live runs show it sometimes
+        # folds `citation_ids` into the answer string (an unclosed string
+        # → malformed JSON), and an identical retry then returns the same
+        # malformed bytes — verified against the live model, the identical
+        # retry can never succeed when the failure is deterministic. The
+        # corrective re-ask names the exact defect (unclosed string, raw
+        # JSON only) and recovered 4/4 malformed live samples while the
+        # strict parse below stays the sole judge (still no application-
+        # side JSON repair). A second failure raises the same 502.
         # Semantic rejections (invented citation) happen after parsing
         # and are never retried.
-        logger.warning("agent_generation_retry outcome=attempted")
-        generation = generate()
+        logger.warning("agent_generation_retry outcome=attempted mode=corrective")
+        corrective_request = CompletionRequest(
+            system_prompt=build_system_prompt(TASK_GENERATION),
+            question=question,
+            evidence=evidence,
+            task=TASK_GENERATION,
+            context=tuple((turn.role, turn.content) for turn in context),
+            candidate_answer=None,
+            user_prompt=generation_prompt + GENERATION_CORRECTION,
+        )
+        try:
+            generation = _parse_generation(provider.complete(corrective_request))
+        except LLMProviderError as exc:
+            logger.error(
+                "agent_llm_call_failed task=%s error_type=LLMProviderError",
+                TASK_GENERATION,
+            )
+            raise LLMUnavailableError(str(exc)) from None
 
     cited, unknown = _validate_citation_ids(generation.citation_ids, evidence)
     if unknown:
