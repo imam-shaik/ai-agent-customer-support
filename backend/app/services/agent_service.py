@@ -263,16 +263,18 @@ def run_agent_turn(
         )
 
     # --- 2. RETRIEVAL (approved scope, SQL-enforced) ---
-    # The assessment (call #1) also returns a spelling-corrected search
-    # query (8b-2): the LLM understands garbled input, while retrieval and
-    # the deterministic coverage gate match raw tokens. Empty/absent falls
-    # back to the raw question (stub assessments, older prompt versions).
-    # An explicit retrieval_query (clarified follow-up) still wins.
+    # Retrieval keeps the RAW question: the embedding model is typo-robust
+    # and prefers full natural sentences (measured live — terse corrected
+    # queries retrieve worse). The assessment's spelling-corrected
+    # search_query (8b-2) feeds the deterministic COVERAGE GATE below,
+    # whose raw token matching cannot survive misspelled input on its own.
+    # Empty/absent correction falls back to the working query (stub
+    # assessments, older prompt versions).
+    coverage_query = working_query
     corrected = assessment.search_query.strip()
-    if corrected and retrieval_query is None:
-        # Bound to the retrieval contract; a search string is only
-        # embedded and token-matched, so truncation is safe.
-        working_query = corrected[: settings.retrieval_max_query_chars]
+    if corrected:
+        # Bound to the query contract; token matching only, truncation safe.
+        coverage_query = corrected[: settings.retrieval_max_query_chars]
 
     try:
         retrieval = RetrievalService(db).retrieve(query=working_query)
@@ -329,10 +331,13 @@ def run_agent_turn(
     )
 
     # --- 5. SIGNAL B: coverage gate (deterministic, config bar) ---
-    # Uses the WORKING query so a clarification follow-up is judged
-    # against both pieces (§4).
+    # Judged against the spelling-corrected query (8b-2): typos in the
+    # customer's words would otherwise never match the correctly spelled
+    # evidence, no matter how relevant the retrieval was. Uses the
+    # corrected query so a clarification follow-up is judged against both
+    # pieces (§4); falls back to the working query when absent.
     covered, coverage_ratio = coverage_gate(
-        working_query, evidence, settings.agent_min_coverage_ratio
+        coverage_query, evidence, settings.agent_min_coverage_ratio
     )
     if not covered:
         decision = _dead_end(

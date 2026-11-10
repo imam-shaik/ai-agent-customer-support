@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from app.core.exceptions import GenerationFailedError
 from app.core.logging import get_logger
-from app.core.text import significant_words
+from app.core.text import significant_words, word_match_variants
 from app.llm.base import EvidenceRef
 from app.schemas.agent import EvidenceVerdict, SupportVerdict
 
@@ -89,17 +89,20 @@ def coverage_gate(
     A query with zero material words (a greeting) passes vacuously —
     there is nothing to cover; the later stages still refuse to invent
     an answer. Evidence words include content and titles, matching what
-    the model actually sees.
+    the model actually sees. Matching accepts the deterministic
+    e-restoration variants (word_match_variants) so a correctly spelled
+    base form in the evidence ("arrive") covers the inflected query word
+    ("arrived") that the crude stemmer shortens differently.
     """
     words = significant_words(query)
     if not words:
         return True, 1.0
     allowed: set[str] = set()
     for item in evidence:
-        allowed |= significant_words(item.content)
-        allowed |= significant_words(item.document_title)
-        allowed |= significant_words(item.section_title)
-    covered = len(words & allowed)
+        for text_field in (item.content, item.document_title, item.section_title):
+            for evidence_word in significant_words(text_field):
+                allowed |= word_match_variants(evidence_word)
+    covered = sum(1 for word in words if word_match_variants(word) & allowed)
     ratio = covered / len(words)
     return ratio >= min_ratio, ratio
 

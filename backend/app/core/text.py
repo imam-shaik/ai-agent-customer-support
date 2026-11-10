@@ -56,3 +56,20 @@ def significant_words(text: str) -> set[str]:
             continue
         words.add(word)
     return words
+
+
+def word_match_variants(word: str) -> frozenset[str]:
+    """Extra acceptable spellings for one normalized word — no fuzz.
+
+    The crude suffix stripping can leave a stem that dropped a silent e
+    ("arrived" -> "arriv", "pricing" -> "pric") while the evidence carries
+    the full base form ("arrive", "price"), so an exact set intersection
+    would call a covered word uncovered. For stems of 4+ letters this adds
+    the e-restored variant — deterministic string surgery only, no edit
+    distance, no prefixes, nothing that could make an unrelated word match.
+    """
+    variants = {word}
+    if len(word) >= 4 and not word.endswith("e"):
+        # arriv -> arrive, pric -> price (e-restoration only)
+        variants.add(word + "e")
+    return frozenset(variants)

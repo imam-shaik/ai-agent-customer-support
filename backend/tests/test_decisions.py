@@ -377,6 +377,34 @@ class TestUncertain:
         assert decision.category == CATEGORY_MODEL_DECLINED
         assert decision.text == UNCERTAIN_TEXT
 
+    def test_coverage_accepts_e_restored_base_form(self):
+        """Deterministic morphology fix (8b-2): the query's 'arrived'
+        stems to 'arriv', but the evidence carries 'arrive' — the
+        e-restoration variant covers it. Unrelated words still do not
+        match: no edit distance, no prefixes."""
+        from app.llm.base import EvidenceRef
+
+        evidence = (
+            EvidenceRef(
+                ref="E1",
+                chunk_id="chunk-0001",
+                document_id="account-access",
+                document_title="Account Access & Recovery",
+                section_id="password-reset",
+                section_title="Password reset",
+                content=(
+                    "Select Forgot password? and we send a reset link. "
+                    "If the email does not arrive, check the spam folder."
+                ),
+            ),
+        )
+        covered, ratio = coverage_gate("password reset not arrived", evidence, 0.75)
+        assert covered is True and ratio == 1.0
+
+        # Still honest about genuinely different words:
+        missed, ratio_missed = coverage_gate("pasword rest", evidence, 0.75)
+        assert missed is False and ratio_missed == 0.0
+
 
 # ---------------------------------------------------------------------------
 # CLARIFICATION + bounded context (§4)
@@ -916,15 +944,31 @@ class TestDeterminism:
         ]
 
 # ---------------------------------------------------------------------------
-# 8b-2: spelling-corrected search_query from call #1 feeds retrieval
+# 8b-2: spelling-corrected search_query from call #1 feeds the coverage gate
 # ---------------------------------------------------------------------------
 
 
 class TestSearchQueryCorrection:
-    """The assessment's spelling-corrected search_query (8b-2) is used for
-    retrieval and the coverage gate: the LLM understands garbled input,
-    the deterministic gates match raw tokens. Empty/absent falls back to
-    the raw question; an explicit retrieval_query still wins."""
+    """The assessment's spelling-corrected search_query (8b-2) feeds the
+    deterministic coverage gate — raw token matching cannot survive
+    misspelled input — while RETRIEVAL keeps the raw question: the
+    embedding model is typo-robust and prefers natural sentences
+    (measured live). Empty/absent correction falls back to the raw
+    question (stub assessments, older prompt versions)."""
+
+    @staticmethod
+    def _team_candidates() -> tuple:
+        return (
+            _candidate(
+                1,
+                doc_title="Team Management",
+                section_title="Invite your team",
+                content=(
+                    "Workspace owners can invite team members "
+                    "by email from the team settings page."
+                ),
+            ),
+        )
 
     @staticmethod
     def _patch_recording_retrieval(
@@ -953,24 +997,15 @@ class TestSearchQueryCorrection:
             RecordingRetrievalService,
         )
 
-    def test_corrected_search_query_reaches_retrieval(
+    def test_retrieval_keeps_raw_question_and_coverage_uses_correction(
         self, monkeypatch: pytest.MonkeyPatch
     ):
+        """Typos reach retrieval untouched (embeddings cope), while the
+        coverage gate runs on the corrected tokens — so the turn grounds
+        instead of dying at partial_coverage."""
         queries: list[str] = []
         self._patch_recording_retrieval(
-            monkeypatch,
-            queries,
-            candidates=(
-                _candidate(
-                    1,
-                    doc_title="Team Management",
-                    section_title="Invite your team",
-                    content=(
-                        "Workspace owners can invite team members "
-                        "by email from the team settings page."
-                    ),
-                ),
-            ),
+            monkeypatch, queries, candidates=self._team_candidates()
         )
         provider = ScriptedProvider(
             {
@@ -990,11 +1025,32 @@ class TestSearchQueryCorrection:
         decision = run_agent_turn(None, question="hw do i invte my tem?")
 
         assert decision.kind == DECISION_GROUNDED
-        assert queries == ["invite team members"]
+        assert queries == ["hw do i invte my tem?"]
 
-    def test_missing_search_query_falls_back_to_raw_question(
+    def test_coverage_gate_still_fails_without_correction(
         self, monkeypatch: pytest.MonkeyPatch
     ):
+        """Without the correction, the misspelled question cannot pass the
+        deterministic coverage gate — proving the correction is what
+        rescues the turn (and that the gate stays conservative)."""
+        self._patch_recording_retrieval(
+            monkeypatch, [], candidates=self._team_candidates()
+        )
+        _patch_provider(
+            monkeypatch, ScriptedProvider({TASK_GENERATION: _GROUNDED_JSON})
+        )
+
+        decision = run_agent_turn(None, question="hw do i invte my tem?")
+
+        assert decision.kind == DECISION_UNCERTAIN
+        assert decision.category == CATEGORY_PARTIAL_COVERAGE
+
+    def test_clean_question_falls_back_to_raw_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """No correction emitted (stub assessments, older prompts) — the
+        raw question drives both retrieval and the gate, exactly as before
+        8b-2."""
         queries: list[str] = []
         self._patch_recording_retrieval(monkeypatch, queries)
         _patch_provider(
@@ -1005,32 +1061,3 @@ class TestSearchQueryCorrection:
 
         assert decision.kind == DECISION_GROUNDED
         assert queries == [QUESTION]
-
-    def test_explicit_retrieval_query_beats_search_query(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        queries: list[str] = []
-        self._patch_recording_retrieval(monkeypatch, queries)
-        provider = ScriptedProvider(
-            {
-                TASK_ASSESSMENT: json.dumps(
-                    {
-                        "ambiguous": False,
-                        "clarification": "",
-                        "options": [],
-                        "search_query": "invite team members",
-                    }
-                ),
-                TASK_GENERATION: _GROUNDED_JSON,
-            }
-        )
-        _patch_provider(monkeypatch, provider)
-
-        decision = run_agent_turn(
-            None,
-            question=QUESTION,
-            retrieval_query="reset password email link",
-        )
-
-        assert decision.kind == DECISION_GROUNDED
-        assert queries == ["reset password email link"]
