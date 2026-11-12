@@ -75,6 +75,30 @@ class TestDemoMode:
                 chunk.embedding_fingerprint = fingerprint
             db_session.commit()
 
+    def test_demo_answers_misspelled_question(self, client):
+        """8b-7: demo mode corrects spelling against the corpus vocabulary
+        — the deterministic analog of the live pipeline's typo tolerance
+        (assessment search_query + typo-robust embeddings). Observed
+        2026-11-12: "when am i billled?" dead-ended in weak_relevance
+        while the correctly-spelled question grounded."""
+        _enable_demo(client)
+        turn = _ask(client, "when am i billled?")
+        reply = turn["assistantMessage"]["reply"]
+        assert reply["kind"] == "grounded"
+        assert reply["citations"], "the corrected question must ground with citations"
+
+    def test_demo_filler_greeting_gets_typed_greeting(self, client):
+        """8b-7: "ok hi" is small talk in demo mode too — the typed
+        greeting steers back to a valid support question instead of the
+        dead-end uncertain reply (observed in live mode 2026-11-12)."""
+        _enable_demo(client)
+        turn = _ask(client, "ok hi")
+        reply = turn["assistantMessage"]["reply"]
+        assert reply["kind"] == "greeting"
+        assert reply["options"], "the greeting offers valid-question suggestions"
+        assert turn["assistantMessage"]["citations"] == []
+        assert "escalationOffer" not in reply
+
     def test_demo_turn_does_not_rewrite_live_embeddings(self, client, db_session):
         _enable_demo(client)
         before = [

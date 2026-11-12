@@ -124,6 +124,17 @@ class TestReplyKinds:
         assert turn["assistantMessage"]["citations"] == []
         assert "escalationOffer" not in reply
 
+    def test_filler_greeting_returns_typed_greeting(self, client: TestClient):
+        # 8b-7 regression (2026-11-12): "ok hi" dead-ended in an uncertain
+        # reply in live mode — the filler "ok" kept the greeting screen
+        # from matching. Pure filler + greeting tokens now classify as
+        # small talk deterministically (zero LLM calls).
+        turn = _turn(client, _session(client), "ok hi")
+        reply = turn["assistantMessage"]["reply"]
+        assert reply["kind"] == "greeting"
+        assert reply["text"].startswith("Hi!")
+        assert turn["assistantMessage"]["citations"] == []
+
 
 class TestValidation:
     def test_empty_content_rejected(self, client: TestClient):

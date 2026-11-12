@@ -356,9 +356,11 @@ class TestUncertain:
     def test_greeting_coverage_is_vacuous_but_still_never_invents(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        """A greeting has zero material words: the coverage gate passes
-        vacuously (nothing to cover) — but the model still declines to
-        ground, so the outcome is UNCERTAIN, never an invented answer."""
+        """An input with zero material words (pure stopwords/filler): the
+        coverage gate passes vacuously (nothing to cover) — but the model
+        still declines to ground, so the outcome is UNCERTAIN, never an
+        invented answer. (The question avoids greeting tokens: a pure
+        greeting is small talk and never reaches the pipeline.)"""
         words_free, ratio = coverage_gate("hello there", (), 0.75)
         assert words_free is True and ratio == 1.0
 
@@ -373,7 +375,7 @@ class TestUncertain:
                 }
             ),
         )
-        decision = run_agent_turn(None, question="hello there")
+        decision = run_agent_turn(None, question="is it or that?")
 
         assert decision.kind == DECISION_UNCERTAIN
         assert decision.category == CATEGORY_MODEL_DECLINED
@@ -1007,14 +1009,25 @@ class TestGreeting:
         )
         _patch_provider(monkeypatch, provider)
 
-        for question in ("hi hello", "Hello!", "hey!!", "thanks", "good morning"):
+        for question in (
+            "hi hello",
+            "Hello!",
+            "hey!!",
+            "thanks",
+            "good morning",
+            "hello there",
+            "hi there",
+            "ok hi",  # 8b-7: filler + greeting (live "ok hi" dead end 2026-11-12)
+            "okay",
+            "ok",
+        ):
             decision = run_agent_turn(None, question=question)
 
             assert decision.kind == DECISION_GREETING, question
             assert decision.text == GREETING_TEXT
             assert decision.category == "small_talk"
 
-        assert _tasks(provider) == []  # zero LLM calls across all five
+        assert _tasks(provider) == []  # zero LLM calls across all ten
 
     def test_support_question_starting_with_hi_is_not_small_talk(
         self, monkeypatch: pytest.MonkeyPatch

@@ -82,6 +82,8 @@ from app.services.evidence_assessment import (
     relevance_gate,
 )
 from app.services.evidence_context import build_evidence
+from app.services.provider_mode_service import is_demo_mode
+from app.services.query_correction import corpus_vocabulary, correct_spelling
 from app.services.retrieval_service import RetrievalService
 
 logger = get_logger("app.agent")
@@ -160,23 +162,26 @@ _INJECTION_PATTERNS = (
     ),
 )
 
-# --- Layer 0b: deterministic small-talk screen (8b-4) -----------------------
+# --- Layer 0b: deterministic small-talk screen (8b-4, 8b-7) -----------------
 # Greetings and pleasantries are conversation, not support questions, and
 # the application answers them with its typed GREETING_TEXT. The live
 # assessment model classifies them too (prompt rule 6), but a bare
 # greeting misread by the model reaches retrieval and dead-ends in a
 # confusing "couldn't confirm an answer" (observed live 2026-11-10:
-# "hi hello" → weak_relevance). A classification this cheap and this
-# visible must not depend on model behavior. Deliberately conservative:
-# SHORT messages starting with an explicit greeting token, or standing
-# meta questions — a real support question that merely STARTS with "hi"
-# still flows through the model pipeline.
+# "hi hello" → weak_relevance; observed live 2026-11-12: "ok hi" →
+# uncertain in BOTH modes — the filler "ok" kept the screen from
+# matching and the live model also missed it). A classification this
+# cheap and this visible must not depend on model behavior. Deliberately
+# conservative: SHORT messages made ONLY of greeting/filler tokens, or
+# standing meta questions — a real support question that merely STARTS
+# with "hi" still flows through the model pipeline.
 
 _GREETING_PATTERN = re.compile(
     # FULL match: a sequence of greeting tokens and punctuation, nothing
-    # else. "hi hello" matches; "hi I am locked out" does not — a real
-    # question that merely STARTS with "hi" flows to the model pipeline.
-    r"^\s*(?:(?:hi|hello|hey|yo|thanks|thank\s+you|thankyou|bye|goodbye|"
+    # else. "hi hello" and "ok hi" match; "hi I am locked out" does not —
+    # a real question that merely STARTS with "hi" flows to the model
+    # pipeline.
+    r"^\s*(?:(?:hi|hello|hey|yo|there|ok|okay|thanks|thank\s+you|thankyou|bye|goodbye|"
     r"good\s+(?:morning|afternoon|evening))\b[\s!.?,:-]*)+$",
     re.IGNORECASE,
 )
@@ -255,6 +260,35 @@ def run_agent_turn(
             options=tuple(UNSUPPORTED_SUGGESTIONS),
             category="input_safety",
         )
+
+    # --- 0a. DEMO-ONLY SPELLING CORRECTION (deterministic, 0 LLM calls) ---
+    # Live mode tolerates typos twice over: the assessment model emits a
+    # spelling-corrected search_query (8b-2) for the coverage gate and the
+    # real embedding is typo-robust, so retrieval copes with the raw
+    # question. Demo mode has neither — a single misspelling ("when am i
+    # billled?", observed 2026-11-12) dead-ended in weak_relevance while
+    # the correctly-spelled question grounded. In demo mode the working
+    # question and the composed retrieval query are corrected against the
+    # corpus vocabulary with a conservative deterministic rule (unique
+    # near-match only, short filler tokens never touched). The persisted
+    # customer message and the reply's question of record stay RAW.
+    if is_demo_mode():
+        vocabulary = corpus_vocabulary(db)
+        corrected_question = correct_spelling(question, vocabulary)
+        corrected_retrieval = (
+            correct_spelling(retrieval_query, vocabulary)
+            if retrieval_query
+            else retrieval_query
+        )
+        if corrected_question != question or corrected_retrieval != retrieval_query:
+            logger.info(
+                "agent_query_corrected mode=demo chars=%d->%d",
+                len(question),
+                len(corrected_question),
+            )
+        question = corrected_question
+        retrieval_query = corrected_retrieval
+        working_query = (retrieval_query or question).strip() or question
 
     # --- 0b. SMALL TALK: deterministic short-circuit, 0 LLM calls (8b-4) ---
     if _is_small_talk(question):

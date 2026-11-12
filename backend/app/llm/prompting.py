@@ -45,7 +45,12 @@ from app.llm.base import (
 # paraphrase-tolerant support judge.
 # 8b-6: numbered steps must be emitted one per line (JSON \n escapes) so
 # the renderer can show real structure instead of a run-on paragraph.
-INSTRUCTIONS_VERSION = "8b-6"
+# 8b-7: filler greetings ("ok", "okay") are small talk — the deterministic
+# screen, the stub and the assessment prompt all classify them, after a
+# live "ok hi" dead-ended in an uncertain reply in both modes (2026-11-12);
+# demo mode also gains deterministic corpus-vocabulary spelling correction
+# (app/services/query_correction.py).
+INSTRUCTIONS_VERSION = "8b-7"
 
 # ---------------------------------------------------------------------------
 # Trusted instruction blocks — one per narrow task (Phase 8B §2)
@@ -80,15 +85,16 @@ new topics, never drop what the customer asked about. When earlier \
 context is needed to understand the question, fold that context into \
 the search text. This field is used for document search and evidence \
 coverage checks, so it must stay faithful to the question.
-6. Greetings, pleasantries and questions about you ("hello", "how are you", \
-"who are you", "what can you do", "thanks", "bye") are SMALL TALK, not \
-support questions: set small_talk=true and ambiguous=false with empty \
-clarification, options and search_query. A message that starts with a \
-greeting but also contains ANY support content — an account problem, an \
-error, a symptom, a question — is NOT small talk: set small_talk=false \
-and judge only the support content ("hi, I am locked out" is a support \
-question). The application answers small talk itself — never ask a \
-clarification for it and never search for it.
+6. Greetings, pleasantries and questions about you ("hello", "hi", "ok", \
+"okay", "how are you", "who are you", "what can you do", "thanks", "bye") \
+are SMALL TALK, not support questions: set small_talk=true and \
+ambiguous=false with empty clarification, options and search_query. A \
+message that starts with a greeting but also contains ANY support \
+content — an account problem, an error, a symptom, a question — is NOT \
+small talk: set small_talk=false and judge only the support content \
+("hi, I am locked out" is a support question). The application answers \
+small talk itself — never ask a clarification for it and never search \
+for it.
 7. Never include internal identifiers (E1, chunk-..., doc-...), API keys, \
 secrets, or phrases like "system prompt" or "instructions" in your output.
 8. Respond with a raw JSON object only: no markdown, no code fences, no \

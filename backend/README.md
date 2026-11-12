@@ -246,6 +246,15 @@ grounded pipeline as its generation stage:
    controlled **escalation offer**; the LLM never chooses wording for a
    non-grounded outcome and never creates tickets — a human hand-off
    stays the existing customer-submitted Phase 5 endpoint.
+8. **Demo-mode determinism extras (8b-7)** — two deterministic, 0-LLM-call
+   screens keep Demo mode on par with Live: filler greetings ("ok hi")
+   classify as small talk through the same typed GREETING_TEXT (screen,
+   stub and assessment prompt rule 6), and the working question is
+   spelling-corrected against the retrievable corpus vocabulary
+   (`app/services/query_correction.py`) — the demo analog of the live
+   pipeline's assessment search_query + typo-robust embeddings. The rule
+   is conservative: unique near-match only, same first letter, small
+   edit budget, short filler tokens never touched.
 
 The conversation context sent to the model is BOUNDED (last
 `AGENT_CONTEXT_MAX_MESSAGES` messages, each truncated to

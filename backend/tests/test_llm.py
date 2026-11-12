@@ -459,7 +459,10 @@ class TestFourTaskPrompts:
         # rejects NEW facts — detailed answers survive signal D.
         # 8b-6: numbered steps are emitted one per line (JSON \n escapes)
         # so the renderer can show real step structure.
-        assert INSTRUCTIONS_VERSION == "8b-6"
+        # 8b-7: filler greetings ("ok", "okay") classify as small talk in
+        # the prompt, the screen and the stub; demo mode gains the
+        # deterministic corpus-vocabulary spelling corrector.
+        assert INSTRUCTIONS_VERSION == "8b-7"
 
 
 # ---------------------------------------------------------------------------
@@ -661,9 +664,23 @@ class TestStubTaskAwareness:
         payload = self._assess("hello there")
         assert payload.get("small_talk") is True
 
+    def test_stub_classifies_filler_greeting_as_small_talk(self):
+        # 8b-7: "ok hi" is a greeting with a filler prefix — the live
+        # "ok hi" dead end (2026-11-12) must classify as small talk here
+        # too, exactly like the agent's deterministic screen.
+        for question in ("ok hi", "okay", "ok"):
+            payload = self._assess(question)
+            assert payload.get("small_talk") is True, question
+
     def test_stub_keeps_long_mixed_message_answerable(self):
         # A real question that merely starts with "hi" is NOT small talk.
         payload = self._assess("hi there, how do I reset my password?")
+        assert payload.get("small_talk", False) is False
+
+    def test_stub_keeps_real_question_after_ok_answerable(self):
+        # "ok" followed by a real question is a support question (the
+        # greeting screen matches ONLY pure greeting/filler sequences).
+        payload = self._assess("ok how do I reset my password?")
         assert payload.get("small_talk", False) is False
 
     def test_stub_evidence_verdict_never_claims_conflict(self):
